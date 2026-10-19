@@ -1678,8 +1678,12 @@ def api_selfupdate():
         try:
             PREVIEW.stop_proc()
             RENDERER.stop()
+            if APP_MODE:
+                subprocess.Popen([sys.executable] + sys.argv, cwd=str(HERE), close_fds=True,
+                                 creationflags=NO_WINDOW | getattr(subprocess, "DETACHED_PROCESS", 0)
+                                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
         finally:
-            os._exit(3)
+            os._exit(0 if APP_MODE else 3)
     threading.Timer(0.7, restart).start()
     return {"message": "Программа обновлена, перезапускаюсь", "output": out}
 
@@ -2037,7 +2041,8 @@ class Preview:
             self.add("> mkdocs serve")
             # без CREATE_NO_WINDOW: mkdocs живет в той же консоли и закрывается вместе с окном run.bat
             self.proc = subprocess.Popen(cmd, cwd=repo, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                         stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+                                         stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+                                         creationflags=NO_WINDOW)
             PID_FILE.write_text(str(self.proc.pid))
             if self.fast:
                 threading.Thread(target=self.watch_fast, args=(repo, self.proc), daemon=True).start()
@@ -2325,6 +2330,9 @@ class Handler(BaseHTTPRequestHandler):
                 PREVIEW.start(req["repo"], bool(req.get("fast")))
                 self.send(200, PREVIEW.status())
                 return
+            if u.path == "/api/shortcut":
+                self.send(200, {"ok": ensure_shortcut(force=True)})
+                return
             if u.path == "/api/render":
                 self.send(200, RENDERER.render(req["repo"], req.get("text", "")))
                 return
@@ -2404,12 +2412,105 @@ def already_running(port):
         return False
 
 
+# ---------- режим приложения: свое окно (Edge в режиме приложения), ярлык, выход по закрытию окна ----------
+
+APP_MODE = "--app" in sys.argv
+APP_PROFILE = HERE / ".app-profile"
+ICON = HERE / "navtool.ico"
+
+
+def find_app_browser():
+    env = os.environ
+    for base in (env.get("ProgramFiles(x86)"), env.get("ProgramFiles"), env.get("LOCALAPPDATA")):
+        for sub in (("Microsoft", "Edge", "Application", "msedge.exe"), ("Google", "Chrome", "Application", "chrome.exe")):
+            if base and Path(base, *sub).is_file():
+                return str(Path(base, *sub))
+    return shutil.which("msedge") or shutil.which("chrome")
+
+
+def open_window(url):
+    """Окно программы без вкладок и адресной строки. Нет Edge/Chrome - обычный браузер."""
+    exe = find_app_browser()
+    if not exe:
+        webbrowser.open(url)
+        return False
+    subprocess.Popen([exe, f"--app={url}", f"--user-data-dir={APP_PROFILE}", "--no-first-run",
+                      "--no-default-browser-check", "--window-size=1500,950"], creationflags=NO_WINDOW)
+    return True
+
+
+def app_window_alive():
+    """Пока окно открыто, браузер держит lockfile в своей папке профиля: удалить его нельзя."""
+    lf = APP_PROFILE / "lockfile"
+    if not lf.exists():
+        return False
+    try:
+        lf.unlink()
+        return False
+    except OSError:
+        return True
+
+
+def watch_app_window():
+    """Закрыли окно программы - выключаемся (вместе с локальным сайтом)."""
+    seen, gone_since = False, None
+    while True:
+        time.sleep(2)
+        if app_window_alive():
+            seen, gone_since = True, None
+            continue
+        if not seen:
+            continue
+        gone_since = gone_since or time.time()
+        if time.time() - gone_since > 4:
+            try:
+                PREVIEW.stop_proc()
+                RENDERER.stop()
+            finally:
+                os._exit(0)
+
+
+def ensure_shortcut(force=False):
+    """Ярлык «Nav Tool» на рабочем столе: запуск без консоли, со своим значком. Создается один раз."""
+    if os.name != "nt":
+        return False
+    cfg = load_config()
+    if cfg.get("shortcut") and not force:
+        return False
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    if not pyw.is_file():
+        pyw = Path(shutil.which("pythonw") or sys.executable)
+    q = lambda s: str(s).replace("'", "''")
+    ps = ("$d=[Environment]::GetFolderPath('Desktop');"
+          "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'Nav Tool.lnk'));"
+          f"$s.TargetPath='{q(pyw)}';$s.Arguments='" + '"' + q(HERE / "nav_tool.py") + '" --app' + "';"
+          f"$s.WorkingDirectory='{q(HERE)}';$s.IconLocation='{q(ICON)},0';$s.Description='Nav Tool';$s.Save()")
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                       capture_output=True, timeout=60, creationflags=NO_WINDOW)
+    if r.returncode == 0:
+        cfg["shortcut"] = True
+        save_config(cfg)
+        return True
+    log_error("shortcut: " + r.stderr.decode("cp866", "replace"))
+    return False
+
+
+def wait_port_free(port, seconds):
+    end = time.time() + seconds
+    while time.time() < end and already_running(port):
+        time.sleep(0.5)
+
+
 def main():
+    restarted = RESTART_FLAG.exists()
+    if restarted:
+        # после обновления старая копия еще освобождает порт
+        wait_port_free(PORT, 15)
     if already_running(PORT) and "--new" not in sys.argv:
         url = f"http://127.0.0.1:{PORT}/"
-        print(f"Nav Tool уже запущен: {url}. Открываю его в браузере, второй экземпляр не нужен.")
+        print(f"Nav Tool уже запущен: {url}. Открываю его окно, второй экземпляр не нужен.")
         if "--no-browser" not in sys.argv:
-            webbrowser.open(url)
+            open_window(url)
         return
     srv = None
     ports = range(PORT, PORT + 10)
@@ -2427,10 +2528,14 @@ def main():
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print(f"Nav Tool: {url}  (закрой это окно, чтобы остановить)")
     threading.Thread(target=find_repos, daemon=True).start()
-    restarted = RESTART_FLAG.exists()
     RESTART_FLAG.unlink(missing_ok=True)
-    if "--no-browser" not in sys.argv and not restarted:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    if "--no-browser" not in sys.argv:
+        if not restarted:
+            threading.Timer(0.6, lambda: open_window(url)).start()
+        # окно программы закрыли - программа завершается (и после перезапуска на обновление тоже следим)
+        threading.Thread(target=watch_app_window, daemon=True).start()
+        if "--no-shortcut" not in sys.argv:
+            threading.Thread(target=ensure_shortcut, daemon=True).start()
     refresh_path()
     kill_stale_preview()
     import atexit

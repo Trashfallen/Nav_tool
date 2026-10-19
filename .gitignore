@@ -9,3 +9,4 @@ navtool.log
 .restart
 __pycache__/
 *.pyc
+.app-profile/
