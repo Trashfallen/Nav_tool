@@ -614,6 +614,52 @@ def api_merge_base(repo):
     return {"message": f"Свежий {base} влит в ветку", "output": out}
 
 
+def api_merge_candidates(repo):
+    """Ветки с сервера, которые можно влить в текущую: свежий список, сколько коммитов придет, кто правил."""
+    git_run(repo, "fetch", "--all", "--prune", timeout=120)
+    cur = git(repo, "branch", "--show-current")
+    upstream = git(repo, "rev-parse", "--abbrev-ref", "@{u}")
+    fmt = "%(refname:short)%09%(committerdate:short)%09%(authorname)%09%(contents:subject)"
+    out = []
+    for l in git(repo, "for-each-ref", "--sort=-committerdate", "--format=" + fmt, "refs/remotes").splitlines():
+        parts = l.split("\t", 3)
+        if len(parts) < 4:
+            continue
+        ref, date, author, subject = parts
+        if ref.endswith("/HEAD") or "/" not in ref or ref == upstream:
+            continue
+        n = git(repo, "rev-list", "--count", f"HEAD..{ref}")
+        out.append({"ref": ref, "name": ref.split("/", 1)[1], "date": date, "author": author, "subject": subject,
+                    "new": int(n) if n.isdigit() else 0})
+    return {"current": cur, "branches": out}
+
+
+def api_merge_preview(repo, ref):
+    if not git(repo, "rev-parse", "--verify", "--quiet", ref):
+        raise ValueError("Ветка не найдена: " + ref)
+    commits = git(repo, "log", "--format=%h  %an  %s", f"HEAD..{ref}").splitlines()
+    files = git(repo, "diff", "--name-status", f"HEAD...{ref}").splitlines()
+    clash = sorted(dirty_files(repo) & {l.split("\t")[-1] for l in files})
+    return {"ref": ref, "commits": commits[:50], "count": len(commits), "files": files[:200], "clash": clash}
+
+
+def api_merge_branch(repo, ref):
+    """Влить ветку коллеги в свою: защита от пересечения с незакоммиченными правками, при конфликте отмена."""
+    cur = git(repo, "branch", "--show-current")
+    if cur in ("master", "main"):
+        raise ValueError(f"Ты на {cur}. Чужую неслитую ветку вливают в свою ветку задачи: сначала создай или выбери ее")
+    if not git(repo, "rev-parse", "--verify", "--quiet", ref):
+        raise ValueError("Ветка не найдена: " + ref)
+    overlap_guard(repo, ref, "влить ветку")
+    code, out = git_run(repo, "merge", "--no-edit", "--autostash", ref, timeout=120)
+    if code:
+        conflicts = git(repo, "diff", "--name-only", "--diff-filter=U")
+        git_run(repo, "merge", "--abort")
+        raise ValueError(f"Слияние с {ref} дало конфликты, отменил его, ветка осталась как была:\n{conflicts or out}\n"
+                         "Такое лучше решать вручную или договориться с автором ветки.")
+    return {"message": f"Ветка {ref} влита в {cur}", "output": out}
+
+
 def git_branches(repo):
     cur = git(repo, "branch", "--show-current")
     fmt = "--format=%(refname:short)\t%(committerdate:short)"
@@ -712,6 +758,12 @@ def api_git(req):
         return api_sync(repo)
     if op == "merge_base":
         return api_merge_base(repo)
+    if op == "merge_candidates":
+        return api_merge_candidates(repo)
+    if op == "merge_preview":
+        return api_merge_preview(repo, req.get("ref", ""))
+    if op == "merge_branch":
+        return api_merge_branch(repo, req.get("ref", ""))
     if op == "branch":
         name = (req.get("name") or "").strip()
         # имя проверяет сам git: те же правила, что при git switch -c
@@ -2315,6 +2367,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(200, api_presets())
             elif u.path == "/api/selfupdate":
                 self.send(200, api_selfupdate_status(q.get("fetch", "1") == "1"))
+            elif u.path == "/api/raw":
+                # файл из docs/ для предпросмотра (картинки по относительным путям)
+                import mimetypes
+                docs, _ = docs_root(q.get("repo", ""))
+                f = (docs / safe_rel(q.get("path", ""))).resolve()
+                if docs.resolve() not in f.parents or not f.is_file():
+                    raise ValueError("Файл не найден")
+                self.send(200, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "application/octet-stream")
             elif u.path == "/api/ls":
                 self.send(200, api_ls(q.get("repo", ""), q.get("path", "")))
             elif u.path == "/api/serve":

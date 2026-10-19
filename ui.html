@@ -1280,17 +1280,29 @@ async function openEditor(path, gotoLine) {
     if (!fr || !document.body.contains(fr)) return;
     const html = await renderHtml(), d = pvDoc();
     if (!document.body.contains(fr)) return;
-    if (pvReady && d) { d.body.innerHTML = html; renderMermaidIn(d); return; }
+    if (pvReady && d) { d.body.innerHTML = html; fixPvImages(d); renderMermaidIn(d); return; }
     fr.onload = () => {
       pvReady = true;
       const d2 = pvDoc(); if (!d2) return;
       d2.body.innerHTML = html;
+      fixPvImages(d2);
       renderMermaidIn(d2);
       d2.body.style.fontSize = (15 * zoom) + "px";
       d2.addEventListener("wheel", onWheel, {passive: false});
       d2.addEventListener("scroll", onPvScroll);
     };
     fr.srcdoc = previewShell();
+  };
+  // картинки с относительными путями берем у программы (считаем путь от папки страницы, как на сайте)
+  const fixPvImages = doc => {
+    const mdDir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+    doc.querySelectorAll("img[src]").forEach(img => {
+      const src = img.getAttribute("src");
+      if (!src || /^([a-z][a-z0-9+.-]*:|\/\/|\/|#)/i.test(src) || img.dataset.fixed) return;
+      const rel = decodeURIComponent(new URL(src, "http://docs/" + mdDir).pathname.slice(1));
+      img.dataset.fixed = "1";
+      img.src = "/api/raw?repo=" + encodeURIComponent(S.repo) + "&path=" + encodeURIComponent(rel);
+    });
   };
   const pv = () => { if (!isMd) return; clearTimeout(pvTimer); pvTimer = setTimeout(pvRender, 250); };
   // синхронная прокрутка: опорные точки - заголовки (строка в тексте <-> заголовок в предпросмотре), между ними плавно
@@ -2177,7 +2189,8 @@ function renderGit() {
     : `<span class="muted small">${g.fetched ? "проверено " + esc(g.fetched) : "ветка еще не связана с сервером"}</span>`;
   $("#gitBody").innerHTML = `
     <div class="syncbar"><button id="gSync">${ic("download")}Скачать обновления</button>${syncInfo}
-      ${g.base_behind ? `<button id="gMerge" title="git merge ${esc(g.base)}">${ic("merge")}Влить свежий ${esc(g.base)} (${g.base_behind})</button>` : ""}</div>
+      ${g.base_behind ? `<button id="gMerge" title="git merge ${esc(g.base)}">${ic("merge")}Влить свежий ${esc(g.base)} (${g.base_behind})</button>` : ""}
+      <button id="gMergeOther" title="Взять в свою ветку изменения из чужой ветки, которую еще не слили в master">${ic("merge")}Влить ветку коллеги</button></div>
     ${ch.length ? `<div class="glist">${ch.map(l => { const s = l.slice(0, 2).trim() || "M"; const k = s === "??" ? "N" : s[0];
       return `<div class="gl"><span class="st ${k}">${s === "??" ? "new" : esc(s)}</span><span class="fp">${esc(l.slice(3))}</span>
         <button class="rv" data-rv="${esc(fileOf(l))}" title="Отменить изменения в этом файле">${ic("undo")}</button>
@@ -2200,6 +2213,7 @@ function renderGit() {
     ${gitOut ? (gitOut.mr ? `<a class="mr" href="${esc(gitOut.mr)}" target="_blank" rel="noopener">${ic("link")}Создать Merge Request в GitLab</a>` : "") + `<div class="out">${esc(gitOut.output || "")}</div>` : ""}
     ${g.log.length ? `<div class="small muted" style="margin-top:12px">Последние коммиты:<br>${g.log.map(esc).join("<br>")}</div>` : ""}`;
   $("#gSync").onclick = () => gitOp("sync");
+  $("#gMergeOther").onclick = () => mergeOtherBranch();
   if ($("#gMerge")) $("#gMerge").onclick = () => modal("Влить свежий " + g.base + "?", `<div>В ветку <b>${esc(g.branch)}</b> придут коммиты из <b>${esc(g.base)}</b> (${g.base_behind}).</div>
       <div class="note info">${ic("info")}<span>Если будут конфликты, слияние отменится само и ветка останется как была.</span></div>`,
       [{text: "Отмена"}, {text: ic("merge") + "Влить", cls: "primary", onClick: () => gitOp("merge_base")}]);
@@ -2245,6 +2259,50 @@ function discard(paths) {
       await load();
     }}]);
 }
+/* влить ветку коллеги (не слитую в master) в свою ветку */
+async function mergeOtherBranch() {
+  const cur = S.git.branch, onMaster = ["master", "main"].includes(cur);
+  modal("Влить ветку коллеги", `<div class="muted">Скачиваю свежий список веток с сервера...</div>`, [{text: "Закрыть"}]);
+  let r;
+  try { r = await api("/api/git", {repo: S.repo, op: "merge_candidates"}); } catch (e) { toast(e.message, "err"); closeModal(true); return; }
+  const draw = q => {
+    const list = r.branches.filter(b => !q || (b.name + " " + b.author + " " + b.subject).toLowerCase().includes(q));
+    $("#mcList").innerHTML = list.map(b => `<div class="fi" data-ref="${esc(b.ref)}" style="${b.new ? "" : "opacity:.55"}">${ic("branch", "ti")}
+      <div class="grow" style="min-width:0"><div class="ttl"><b>${esc(b.name)}</b></div>
+        <div class="small muted ttl">${esc(b.author)}, ${esc(b.date)}: ${esc(b.subject)}</div></div>
+      <span class="pill ${b.new ? "ok" : "grey"}">${b.new ? "+" + b.new + " коммит." : "уже есть у тебя"}</span></div>`).join("")
+      || `<div class="empty">${ic("info")}Ничего не найдено</div>`;
+  };
+  modal("Влить ветку коллеги", `
+    <div>Изменения из выбранной ветки придут в твою ветку <b>${esc(cur)}</b>. Удобно, когда коллега завел папку или страницы, а его MR еще не слили.</div>
+    ${onMaster ? `<div class="note warn">${ic("warn")}<span>Ты на ${esc(cur)}. Чужую неслитую ветку вливают в свою ветку задачи: сначала создай или выбери ее в блоке «Ветка».</span></div>` : ""}
+    <input type="text" id="mcQ" placeholder="Поиск: номер задачи, автор, название" style="margin-top:10px">
+    <div class="flist" id="mcList"></div>`, [{text: "Закрыть"}]);
+  draw("");
+  $("#mcQ").oninput = e => draw(e.target.value.trim().toLowerCase());
+  setTimeout(() => $("#mcQ") && $("#mcQ").focus(), 50);
+  $("#mcList").onclick = async e => {
+    const row = e.target.closest("[data-ref]"); if (!row) return;
+    const b = r.branches.find(x => x.ref === row.dataset.ref);
+    if (!b.new) { toast("Все из этой ветки у тебя уже есть", "info"); return; }
+    let pv;
+    try { pv = await api("/api/git", {repo: S.repo, op: "merge_preview", ref: b.ref}); } catch (x) { toast(x.message, "err"); return; }
+    const st = {A: "new", M: "M", D: "D", R: "R"};
+    modal("Влить " + b.name + "?", `
+      <div>В ветку <b>${esc(cur)}</b> придут коммиты из <b>${esc(b.ref)}</b> (${pv.count}):</div>
+      <div class="glist" style="margin-top:6px">${pv.commits.map(c => `<div class="gl"><span class="fp">${esc(c)}</span></div>`).join("")}</div>
+      <div style="margin-top:10px">Файлы (${pv.files.length}):</div>
+      <div class="glist" style="margin-top:6px">${pv.files.map(f => { const [s, ...rest] = f.split("\t"); const k = s[0];
+        return `<div class="gl"><span class="st ${k === "A" ? "N" : k}">${esc(st[k] || s)}</span><span class="fp">${esc(rest.join(" -> "))}</span></div>`; }).join("")}</div>
+      ${pv.clash.length ? `<div class="note warn">${ic("warn")}<span>В этих файлах у тебя есть незакоммиченные правки, а ветка их тоже меняет: ${pv.clash.map(esc).join(", ")}.
+        Сначала закоммить или сбрось их.</span></div>` : ""}
+      <div class="note info">${ic("info")}<span>Пока MR коллеги не слит, в твоем MR будут видны и его коммиты. Когда его MR сольют в master, они из твоего MR пропадут сами.
+        Если будет конфликт, вливание отменится и ветка останется как была.</span></div>`,
+      [{text: "Назад", onClick: () => { mergeOtherBranch(); return true; }},
+       {text: ic("merge") + "Влить", cls: "primary", disabled: onMaster || pv.clash.length > 0, onClick: () => gitOp("merge_branch", {ref: b.ref})}]);
+  };
+}
+
 async function switchBranch(name, mode, message) {
   let r;
   try { r = await api("/api/git", {repo: S.repo, op: "switch", name, mode, message}); }
