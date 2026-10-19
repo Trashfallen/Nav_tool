@@ -337,8 +337,22 @@ def dir_hint(nodes, nid):
     while cur is not None:
         pages = [p for p in descendant_pages(nodes, cur) if is_local_md(p)]
         if pages:
-            dirs = Counter(p.rsplit("/", 1)[0] if "/" in p else "" for p in pages)
-            return dirs.most_common(1)[0][0]
+            # папка раздела: самая верхняя папка, где лежат только страницы этого раздела
+            # (у «Требований» это analysis, а не analysis/APIM2M/Faza1, где их просто больше всего);
+            # если своей папки нет, общая папка всех его страниц
+            dirs = [p.rsplit("/", 1)[0].split("/") if "/" in p else [] for p in pages]
+            common = []
+            for parts in zip(*dirs):
+                if any(x != parts[0] for x in parts):
+                    break
+                common.append(parts[0])
+            mine = set(pages)
+            foreign = [n["path"] for n in nodes if is_local_md(n["path"]) and n["path"] not in mine]
+            for depth in range(1, len(common) + 1):
+                f = "/".join(common[:depth]) + "/"
+                if not any(p.startswith(f) for p in foreign):
+                    return f[:-1]
+            return "/".join(common)
         cur = nodes[cur]["parent"]
     return ""
 
@@ -1369,6 +1383,11 @@ def api_newfile(req):
     title = (req.get("title") or "").strip()
     is_md = p.suffix.lower() in (".md", ".markdown")
     content = f"# {title or p.stem}\n\n" if is_md else ""
+    if isinstance(req.get("content"), str):
+        # текст готового файла с компьютера
+        if len(req["content"]) > 5 * 1024 * 1024:
+            raise ValueError("Файл больше 5 МБ")
+        content = req["content"].replace("\r\n", "\n")
     nav = req.get("nav")
     if nav is not None and is_md:
         lines, nl, bom, sha = read_yml(repo)

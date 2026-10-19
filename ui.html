@@ -1765,33 +1765,65 @@ function newPage(pk) {
   const isV = !!vOf(pk), ch = isV ? vChain(pk) : {id: byKey[pk], key: pk, titles: []};
   const pid = ch.id;
   const base = hintK(pk).replace(/\/+$/, "");
+  let fileText = null;  // текст md-файла, выбранного на компьютере
+  const create = async openAfter => {
+    const title = $("#npTitle").value.trim();
+    let name = $("#npName").value.trim();
+    if (!title) { toast("Напиши название", "err"); return true; }
+    if (!name) name = slug(title) + ".md";
+    if (!/\.(md|markdown)$/i.test(name)) name += ".md";
+    const dir = $("#npDir").value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    try {
+      const r = await api("/api/newfile", {repo: S.repo, sha: S.sha, dir, name, title, mode: "end",
+        nav: isV ? {id: pid, sub: ch.titles} : pid, ...(fileText !== null ? {content: fileText} : {})});
+      toastUndo(r.message);
+      openK.add(ch.key);
+      closeModal(true);
+      await load(null);
+      renderTree(S.nodes.filter(n => n.path === r.path).map(n => K[n.id]));
+      ftCache = {};
+      if (openAfter) openEditor(r.path);
+    } catch (e) { toast(e.message, "err"); return true; }
+  };
   modal("Новая страница", `
     <div class="small muted">В разделе меню: <b>${esc(crumbK(pk))}</b></div>
+    <div class="row" style="margin-top:10px">
+      <button id="npPick">${ic("upload")}Выбрать на компьютере</button>
+      <span id="npSrc" class="small muted">или создать пустую страницу с заголовком</span>
+      <input type="file" id="npFile" accept=".md,.markdown,text/markdown" class="hidden">
+    </div>
     <label class="fl">Название в меню</label><input type="text" id="npTitle" placeholder="Например: LES-13800 Новая история">
     <label class="fl">Имя файла</label><input type="text" id="npName" placeholder="les-13800.md">
     <label class="fl">Папка внутри ${esc(S.docs_dir)}/</label><input type="text" id="npDir" list="dirList" value="${esc(base)}">
-    <div class="small muted" style="margin-top:8px">Создастся md-файл с заголовком, строка добавится в ${esc(S.yml)}, и файл откроется в редакторе.</div>`,
-    [{text: "Отмена"}, {text: ic("filePlus") + "Создать", cls: "primary", onClick: async () => {
-      const title = $("#npTitle").value.trim();
-      let name = $("#npName").value.trim();
-      if (!title) { toast("Напиши название", "err"); return true; }
-      if (!name) name = slug(title) + ".md";
-      if (!/\.(md|markdown)$/i.test(name)) name += ".md";
-      const dir = $("#npDir").value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-      try {
-        const r = await api("/api/newfile", {repo: S.repo, sha: S.sha, dir, name, title, nav: isV ? {id: pid, sub: ch.titles} : pid, mode: "end"});
-        toastUndo(r.message);
-        openK.add(ch.key);
-        closeModal(true);
-        await load(null);
-        renderTree(S.nodes.filter(n => n.path === r.path).map(n => K[n.id]));
-        ftCache = {};
-        openEditor(r.path);
-      } catch (e) { toast(e.message, "err"); return true; }
-    }}]);
-  let nameTouched = false;
+    <div class="small muted" style="margin-top:8px" id="npHint">Создастся md-файл с заголовком и строка в ${esc(S.yml)}.</div>`,
+    [{text: "Отмена"},
+     {text: ic("filePlus") + "Создать", onClick: () => create(false)},
+     {text: ic("code") + "Создать и открыть в редакторе", cls: "primary", onClick: () => create(true)}]);
+  let nameTouched = false, titleTouchedNp = false;
   $("#npName").oninput = () => { nameTouched = true; };
-  $("#npTitle").oninput = () => { if (!nameTouched) $("#npName").value = $("#npTitle").value.trim() ? slug($("#npTitle").value) + ".md" : ""; };
+  $("#npTitle").oninput = () => {
+    titleTouchedNp = !!$("#npTitle").value.trim();
+    if (!nameTouched) $("#npName").value = $("#npTitle").value.trim() ? slug($("#npTitle").value) + ".md" : "";
+  };
+  $("#npPick").onclick = () => $("#npFile").click();
+  $("#npFile").onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      fileText = String(rd.result);
+      const stem = f.name.replace(/\.(md|markdown)$/i, "");
+      if (!titleTouchedNp) $("#npTitle").value = mdTitle(fileText, stem);
+      if (!nameTouched) $("#npName").value = f.name.replace(/\s+/g, "-");
+      $("#npSrc").innerHTML = `Текст из файла <b>${esc(f.name)}</b> (${Math.max(1, Math.round(f.size / 1024))} КБ) <a href="#" id="npClear">убрать</a>`;
+      $("#npHint").textContent = "Страница создастся с текстом выбранного файла, строка добавится в " + S.yml + ".";
+      $("#npClear").onclick = ev => {
+        ev.preventDefault(); fileText = null; $("#npFile").value = "";
+        $("#npSrc").textContent = "или создать пустую страницу с заголовком";
+        $("#npHint").textContent = "Создастся md-файл с заголовком и строка в " + S.yml + ".";
+      };
+    };
+    rd.readAsText(f, "utf-8");
+  };
   withFolderPicker($("#npDir"));
   setTimeout(() => $("#npTitle").focus(), 50);
 }
