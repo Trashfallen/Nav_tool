@@ -1,0 +1,11 @@
+# личные данные программы: у каждого свои, в git не кладем
+config.json
+backups/
+.mkdocs-env/
+.node/
+navtool.log
+.mkdocs-fast.yml
+.mkdocs.pid
+.restart
+__pycache__/
+*.pyc

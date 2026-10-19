@@ -1,0 +1,2374 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nav Tool</title>
+<script>
+  // тема ставится до отрисовки, чтобы не мигало: сохраненный выбор или тема Windows
+  (function () {
+    var th = null;
+    try { th = localStorage.getItem("navtool.theme"); } catch (e) {}
+    if (th !== "dark" && th !== "light") th = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = th;
+  })();
+</script>
+<style>
+:root {
+  --bg: #f3f4f8; --surface: #fff; --surface2: #f8f9fb; --border: #e3e6ec; --text: #161b26; --muted: #667085;
+  --accent: #4f46e5; --accent-weak: #eef0ff; --accent-text: #fff;
+  --green: #12805c; --green-weak: #e6f6ee; --red: #c0392b; --red-weak: #fdecea; --amber: #b54708; --amber-weak: #fff4e5;
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 4px 16px rgba(16,24,40,.06); --code: #f6f7f9;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1117; --surface: #171a22; --surface2: #1c2029; --border: #2a2f3b; --text: #e7e9ee; --muted: #9098aa;
+  --accent: #8b85ff; --accent-weak: #25244a; --accent-text: #0f1117;
+  --green: #4fd39a; --green-weak: #16302a; --red: #ff8578; --red-weak: #3a1f1d; --amber: #f5b14c; --amber-weak: #35291a;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25); --code: #12151c;
+}
+/* переключатель темы: светлая - серая дорожка и белый кружок, темная - зеленая дорожка и черный кружок */
+.theme-sw { position: relative; width: 56px; height: 30px; border-radius: 99px; border: 2px solid #d4d6db; padding: 0; cursor: pointer; flex: none;
+  background: linear-gradient(90deg, #f1f2f4, #c9cbd0); transition: background .25s, border-color .25s; }
+.theme-sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: left .25s, background .25s; }
+.theme-sw.dark { background: linear-gradient(90deg, #b6f7a4, #39e639); border-color: #2bd92b; }
+.theme-sw.dark::after { left: 28px; background: radial-gradient(circle at 35% 35%, #555, #000 70%); }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.grow { flex: 1; }
+.i { width: 16px; height: 16px; flex: none; }
+
+button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+button.ghost { background: transparent; border-color: transparent; }
+button.ghost:hover:not(:disabled) { background: var(--accent-weak); border-color: transparent; }
+button.danger { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+button.big { padding: 10px 18px; font-size: 15px; }
+input[type=text] { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); outline: none; }
+input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; cursor: pointer; flex: none; }
+label.fl { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+.card-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+.card-head h2 { margin: 0; font-size: 15px; }
+.card-body { padding: 0 16px 16px; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--accent-weak); color: var(--accent); font-weight: 600; white-space: nowrap; }
+.pill.warn { background: var(--amber-weak); color: var(--amber); }
+.pill.ok { background: var(--green-weak); color: var(--green); }
+.pill.grey { background: var(--surface2); color: var(--muted); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; }
+
+/* ---------- выбор папки ---------- */
+#pick { min-height: 100vh; display: flex; justify-content: center; padding: 48px 16px; }
+.pick-wrap { width: 100%; max-width: 820px; }
+.pick-wrap h1 { font-size: 26px; margin: 28px 0 4px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin: 18px 0 22px; }
+.rcard { text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); white-space: normal; }
+.rcard b { font-size: 14px; }
+.rcard .p { font-size: 12px; color: var(--muted); word-break: break-all; }
+.sec-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 0; }
+.browser { overflow: hidden; }
+.br-top { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.br-top button { padding: 4px 10px; font-size: 13px; }
+.br-path { display: flex; align-items: center; gap: 4px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.crumb { padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+.crumb:hover { background: var(--accent-weak); }
+.br-list { max-height: 46vh; overflow: auto; }
+.br-item { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.br-item:hover { background: var(--accent-weak); }
+.br-item.mk { background: var(--green-weak); }
+.br-item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-foot { display: flex; gap: 8px; padding: 12px 14px; align-items: center; background: var(--surface2); flex-wrap: wrap; }
+.br-foot input { flex: 1; min-width: 200px; }
+
+/* ---------- приложение ---------- */
+.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.proj { flex-direction: column; align-items: flex-start; gap: 0; padding: 4px 10px; max-width: 46vw; min-width: 0; overflow: hidden; }
+.proj .pn { font-weight: 700; }
+.proj .pp { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.grid { display: grid; grid-template-columns: minmax(0, var(--lw, 53%)) 16px minmax(0, 1fr); padding: 16px 18px 40px; align-items: start; }
+@media (max-width: 980px) { .grid { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 12px; } .tree-card { position: static !important; height: 70vh !important; } .grid > .split { display: none; } }
+.split { align-self: stretch; cursor: col-resize; position: relative; touch-action: none; user-select: none; }
+.split::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; border-radius: 2px; background: transparent; transition: background .15s; }
+.split::after { content: ""; position: sticky; top: 45vh; display: block; margin: 0 auto; width: 6px; height: 44px; border-radius: 4px; background: var(--border); transition: background .15s; }
+.split:hover::before, .split.drag::before { background: var(--accent); }
+.split:hover::after, .split.drag::after { background: var(--accent); }
+body.dragging, body.dragging * { cursor: col-resize !important; user-select: none !important; }
+.tree-card { position: sticky; top: 72px; height: calc(100vh - 90px); display: flex; flex-direction: column; }
+.tree-tools { display: flex; gap: 8px; padding: 0 16px 10px; align-items: center; }
+.tree-tools input { flex: 1; }
+#tree { flex: 1; overflow: auto; padding: 0 8px 12px; }
+.tr { display: flex; align-items: center; gap: 7px; padding: 4px 8px 4px calc(6px + var(--d) * 18px); border-radius: 8px; min-height: 30px; cursor: default; position: relative; }
+.tr:hover { background: var(--surface2); }
+.tr.sec { cursor: pointer; }
+.tr.sec .ttl { font-weight: 600; }
+.tr.on { background: var(--accent-weak); }
+.tr.on .ttl { color: var(--accent); }
+.tr.here .ttl, .tr.here .ti { color: var(--green); }
+.tr.flash { animation: flash 2.2s ease-out; }
+@keyframes flash { 0%, 30% { background: var(--green-weak); box-shadow: inset 3px 0 0 var(--green); } 100% { background: transparent; } }
+.tw { width: 18px; height: 18px; padding: 0; border: 0; background: none; justify-content: center; color: var(--muted); flex: none; }
+.tw .i { width: 14px; height: 14px; transition: transform .15s; }
+.tw.open .i { transform: rotate(90deg); }
+.ti { color: var(--muted); }
+.tr.sec .ti { color: var(--accent); }
+.ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pth { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; opacity: .8; }
+.cnt { font-size: 11px; color: var(--muted); background: var(--surface2); padding: 0 6px; border-radius: 99px; margin-right: auto; }
+.acts { display: none; gap: 2px; margin-left: auto; flex: none; }
+.tr:hover .acts, .tr.editing .acts { display: flex; }
+.acts button { padding: 5px; border: 0; background: transparent; border-radius: 7px; color: var(--muted); }
+.acts button .i { width: 20px; height: 20px; }
+.acts button:hover:not(:disabled) { background: var(--surface); color: var(--accent); }
+.acts button.del:hover:not(:disabled) { color: var(--red); }
+.tr.virt .ttl { font-style: italic; }
+.tr.virt .ti { stroke-dasharray: 3 2; }
+.gl { align-items: center; }
+.gl .rv { margin-left: auto; padding: 2px 6px; border: 0; background: transparent; color: var(--muted); border-radius: 6px; font: 12px "Segoe UI", sans-serif; }
+.gl .rv:hover { color: var(--red); background: var(--red-weak); }
+.syncbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); }
+.yerr { margin: 0 16px 10px; border: 1px solid var(--red); background: var(--red-weak); border-radius: 12px; padding: 12px 14px; color: var(--red); }
+.yerr b { display: block; margin-bottom: 4px; }
+.yerr pre { margin: 8px 0; background: var(--surface); color: var(--text); border-radius: 8px; padding: 6px 0; font: 12px/1.55 Consolas, monospace; overflow: auto; }
+.yerr pre div { padding: 0 10px; white-space: pre; }
+.yerr pre .bad { background: var(--red-weak); color: var(--red); font-weight: 700; }
+.yerr pre .n { display: inline-block; width: 36px; color: var(--muted); user-select: none; }
+.ren { padding: 3px 8px !important; max-width: 340px; }
+mark { background: var(--amber-weak); color: inherit; border-radius: 3px; }
+
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.step { display: flex; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.step-n { width: 24px; height: 24px; border-radius: 50%; background: var(--accent-weak); color: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 12px; flex: none; }
+.step.done .step-n { background: var(--green); color: #fff; }
+.step-b { flex: 1; min-width: 0; }
+.step-t { font-weight: 700; margin: 2px 0 8px; }
+.drop { border: 2px dashed var(--border); border-radius: 12px; padding: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; transition: all .15s; }
+.drop.over { border-color: var(--accent); background: var(--accent-weak); }
+.drop .i { width: 26px; height: 26px; color: var(--accent); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.filebox { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); }
+.filebox .i { width: 22px; height: 22px; color: var(--accent); }
+.filebox .fn { font-weight: 600; word-break: break-all; }
+.pathline { margin-top: 8px; font: 12px/1.5 Consolas, monospace; background: var(--code); padding: 6px 10px; border-radius: 8px; word-break: break-all; color: var(--muted); }
+.pathline b { color: var(--text); font-weight: 600; }
+.check { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; cursor: pointer; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-weak); color: var(--accent); border-radius: 99px; padding: 4px 4px 4px 10px; font-size: 12px; font-weight: 600; max-width: 100%; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip button { padding: 2px; border: 0; background: none; color: inherit; border-radius: 50%; }
+.chip button:hover { background: var(--surface) !important; }
+.chip .i { width: 13px; height: 13px; }
+.hint { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.seg { display: inline-flex; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: transparent; padding: 5px 12px; border-radius: 7px; }
+.seg button.on { background: var(--surface); box-shadow: var(--shadow); color: var(--accent); font-weight: 600; }
+details { margin-top: 10px; }
+summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+details input { margin-top: 8px; }
+.add-foot { display: flex; align-items: center; gap: 10px; justify-content: flex-end; padding: 12px 16px 16px; border-top: 1px solid var(--border); }
+.note { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-top: 8px; }
+.note .i { margin-top: 1px; }
+.note.ok { background: var(--green-weak); color: var(--green); }
+.note.warn { background: var(--amber-weak); color: var(--amber); }
+.note.err { background: var(--red-weak); color: var(--red); }
+.note.info { background: var(--accent-weak); color: var(--accent); }
+
+.glist { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; max-height: 200px; overflow-y: auto; }
+.gl { display: flex; gap: 10px; padding: 6px 10px; font: 12px/1.5 Consolas, monospace; border-bottom: 1px solid var(--border); }
+.gl:last-child { border-bottom: 0; }
+.gl .st { width: 22px; font-weight: 700; flex: none; }
+.gl .st.M { color: var(--amber); } .gl .st.A, .gl .st.N { color: var(--green); } .gl .st.D { color: var(--red); }
+.gl .fp { word-break: break-all; }
+.gstep { margin-top: 14px; }
+.gstep .lbl { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
+.gstep .row input { flex: 1; min-width: 160px; }
+.out { margin-top: 10px; font: 12px/1.5 Consolas, monospace; background: var(--code); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; }
+.mr { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--green-weak); color: var(--green); font-weight: 600; text-decoration: none; }
+
+.tabs2 { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.tabs2 button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 10px; color: var(--muted); }
+.tabs2 button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tabs2 .c { font-size: 11px; background: var(--surface2); border-radius: 99px; padding: 0 6px; }
+.clist { max-height: 300px; overflow: auto; }
+.ci { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.ci:last-child { border-bottom: 0; }
+.ci .b { flex: 1; min-width: 0; }
+.ci .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci .s { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { padding: 18px 16px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+
+.modal { position: fixed; inset: 0; background: rgba(10,12,20,.45); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-box { background: var(--surface); border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.3); width: 100%; max-width: 760px; max-height: 90vh; display: flex; flex-direction: column; }
+.modal-box.wide { max-width: 98vw; width: min(1500px, 98vw); height: 92vh; max-height: 98vh; min-width: 560px; min-height: 380px; resize: both; overflow: hidden; }
+.modal.fullmode { padding: 0; }
+.modal-box.wide.full { width: 100vw !important; height: 100vh !important; max-width: none; max-height: none; border-radius: 0; resize: none; }
+.modal-box.wide .modal-body { flex: 1; display: flex; flex-direction: column; min-height: 0; padding-bottom: 0; overflow: hidden; }
+.ed-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.ed-bar .fname { font: 600 13px Consolas, monospace; word-break: break-all; }
+.ed { flex: 1; display: grid; grid-template-columns: minmax(0, var(--ew, 50%)) 14px minmax(0, 1fr); min-height: 0; }
+.ed.nopv { grid-template-columns: 1fr; }
+.ed.nopv .split { display: none; }
+.ed .split::after { position: absolute; top: 50%; left: 50%; margin: -22px 0 0 -3px; }
+@media (max-width: 900px) { .ed { grid-template-columns: 1fr; } .ed .pv, .ed .split { display: none; } }
+.ed-code { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--code); min-height: 0; }
+.ed-code:focus-within { border-color: var(--accent); }
+.mdbar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px 6px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface2); }
+.mdbar button { border: 0; background: transparent; padding: 0; width: 32px; height: 30px; justify-content: center; border-radius: 7px; color: var(--text); font: 600 13px "Segoe UI", sans-serif; }
+.mdbar button:hover { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+.mdbar button .i { width: 17px; height: 17px; }
+.mdbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 5px; }
+.imgdrop { margin: 4px 10px; border: 2px dashed var(--border); border-radius: 10px; padding: 14px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; color: var(--muted); }
+.imgdrop.over { border-color: var(--accent); background: var(--accent-weak); }
+.imgdrop .i { width: 26px; height: 26px; color: var(--accent); }
+#imPrev { display: block; max-width: calc(100% - 20px); max-height: 170px; margin: 6px auto; border-radius: 8px; border: 1px solid var(--border); }
+.fprow { display: flex; gap: 6px; align-items: center; }
+.fprow input { flex: 1; }
+.fpi { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px calc(8px + var(--d) * 16px); border-radius: 7px; cursor: pointer; }
+.fpi:hover { background: var(--accent-weak); }
+.fpi.sel { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.fpi .tw { width: 16px; height: 16px; }
+.fpi .add { margin-left: auto; padding: 2px 6px; border: 0; background: none; color: var(--muted); border-radius: 6px; visibility: hidden; }
+.fpi:hover .add { visibility: visible; }
+.fpi .add:hover { color: var(--accent); background: var(--surface); }
+#updBtn.has { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+.mdbar .pbtn { width: auto; padding: 0 10px; gap: 6px; color: var(--accent); }
+.pmenu { position: absolute; z-index: 70; width: 360px; max-height: 62vh; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.25); padding: 6px; }
+.pmenu .pg { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px 4px; }
+.pmenu .pi { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+.pmenu .pi:hover { background: var(--accent-weak); }
+.pmenu .pi .d { font-size: 12px; color: var(--muted); }
+.pmenu .pi .x { margin-left: auto; padding: 2px 6px; border: 0; background: none; color: var(--muted); border-radius: 6px; }
+.pmenu .pi .x:hover { color: var(--red); background: var(--red-weak); }
+.mdbar .h { font-size: 12px; letter-spacing: -.02em; }
+.mdbar .h sub { font-size: 9px; }
+.ed-head { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 10px; }
+.ed-head .ttl2 { display: flex; gap: 8px; align-items: center; font-size: 16px; font-weight: 700; }
+.ed-head .ttl2 .i { width: 20px; height: 20px; color: var(--accent); }
+.ed-meta { display: flex; gap: 6px 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.ed-meta span { display: inline-flex; gap: 5px; align-items: center; }
+.ed-meta b { color: var(--text); font-weight: 600; }
+.ed-meta .i { width: 14px; height: 14px; }
+.zoom { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.zoom button { border: 0; border-radius: 0; padding: 4px 10px; background: var(--surface); }
+.zoom span { min-width: 48px; text-align: center; font-size: 12px; color: var(--muted); cursor: pointer; }
+.ptabs { display: flex; gap: 4px; padding: 0 16px 10px; }
+.ptabs button { border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; color: var(--muted); font-weight: 600; }
+.ptabs button.on { background: var(--accent-weak); color: var(--accent); }
+.ftools { display: flex; gap: 8px; padding: 0 16px 10px; align-items: center; flex-wrap: wrap; }
+#ftree { flex: 1; overflow: auto; padding: 0 8px 12px; }
+.tr .fsz { font-size: 11px; color: var(--muted); margin-left: 4px; white-space: nowrap; }
+.tr.fdir .ttl { font-weight: 600; }
+.tr.ffile.txt { cursor: pointer; }
+#ftree .tr[draggable="true"] { cursor: grab; }
+#ftree .tr.dragging { opacity: .45; }
+#ftree .tr.dropok { background: var(--accent-weak); box-shadow: inset 0 0 0 2px var(--accent); }
+.tr.ffile.bin .ttl { color: var(--muted); }
+.gut { padding: 10px 6px 10px 0; min-width: 46px; text-align: right; color: var(--muted); font: 13px/1.6 Consolas, monospace; overflow: hidden; user-select: none; background: var(--surface2); border-right: 1px solid var(--border); white-space: pre; }
+.ed textarea { flex: 1; border: 0; outline: none; resize: none; padding: 10px 12px; font: 13px/1.6 Consolas, monospace; background: transparent; color: var(--text); white-space: pre; overflow: auto; tab-size: 4; }
+.pv { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.pv .pvh { font-size: 12px; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.pv iframe { flex: 1; border: 0; width: 100%; background: #fff; }
+.dirty-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); display: inline-block; }
+.modal-head { display: flex; align-items: center; padding: 16px 18px 8px; }
+.modal-head h3 { margin: 0; font-size: 17px; flex: 1; }
+.modal-body { padding: 4px 18px 8px; overflow: auto; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; }
+pre.diff { background: var(--code); border: 1px solid var(--border); border-radius: 10px; padding: 8px 0; overflow: auto; font: 12px/1.6 Consolas, monospace; margin: 12px 0 0; }
+pre.diff div { padding: 0 12px; white-space: pre; }
+pre.diff .a { background: var(--green-weak); color: var(--green); }
+pre.diff .d { background: var(--red-weak); color: var(--red); }
+pre.diff .h { color: var(--accent); }
+.flist { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 10px; margin-top: 10px; }
+.fi { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.fi:hover { background: var(--accent-weak); }
+.fi:last-child { border-bottom: 0; }
+
+#serveBtn.run { background: var(--green-weak); border-color: var(--green); color: var(--green); font-weight: 600; }
+#serveBtn.busy { background: var(--amber-weak); border-color: var(--amber); color: var(--amber); }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.slog { margin-top: 12px; font: 12px/1.5 Consolas, monospace; background: var(--code); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.sstate { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 10px; font-weight: 600; }
+.sstate.run { background: var(--green-weak); color: var(--green); }
+.sstate.busy { background: var(--amber-weak); color: var(--amber); }
+.sstate.err { background: var(--red-weak); color: var(--red); }
+.sstate.idle { background: var(--surface2); color: var(--muted); }
+#offline { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 80; display: flex; gap: 10px; align-items: center;
+  max-width: min(760px, calc(100vw - 32px)); background: var(--red); color: #fff; padding: 12px 16px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.3); font-size: 14px; }
+#offline .i { width: 20px; height: 20px; flex: none; }
+#toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+.toast { display: flex; gap: 8px; align-items: flex-start; background: var(--text); color: var(--bg); padding: 10px 14px; border-radius: 10px; box-shadow: var(--shadow); max-width: 420px; animation: tin .2s ease-out; font-size: 13px; white-space: pre-wrap; }
+.toast.err { background: var(--red); color: #fff; }
+.toast { align-items: center; }
+.toast .tundo { margin-left: 10px; padding: 3px 10px; background: transparent; color: inherit; border: 1px solid currentColor; border-radius: 7px; font-weight: 600; flex: none; }
+.toast .tundo:hover { background: rgba(127,127,127,.25); }
+.toast.ok .i { color: var(--green); }
+@keyframes tin { from { transform: translateY(8px); opacity: 0; } }
+</style>
+</head>
+<body>
+
+<!-- ===== выбор папки ===== -->
+<div id="pick" class="hidden">
+  <div class="pick-wrap">
+    <div class="row"><div class="brand"><div class="logo" id="logo1"></div>Nav Tool</div><div class="grow"></div>
+      <button class="ghost hidden" id="pickBack"></button></div>
+    <h1>Где лежит документация?</h1>
+    <div class="muted">Выбери папку с mkdocs.yml. Дальше все правки меню, ветка, коммит и push делаются здесь.</div>
+    <div id="repoBlock"></div>
+    <div class="sec-title">Или найди папку</div>
+    <div class="card browser" style="margin-top:10px">
+      <div class="br-top" id="places"></div>
+      <div class="br-path"><button class="ghost" id="brUp" title="Наверх"></button><div id="brCrumbs" class="row" style="gap:2px"></div></div>
+      <div class="br-list" id="brList"></div>
+      <div class="br-foot">
+        <input type="text" id="brInput" placeholder="Или вставь путь, например C:\Users\...\documentation">
+        <button id="brGo">Перейти</button>
+        <button class="primary" id="brOpen" disabled>Открыть эту папку</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== основной экран ===== -->
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="brand"><div class="logo" id="logo2"></div></div>
+    <button class="ghost proj" id="projBtn" title="Сменить папку"><span class="pn" id="projName"></span><span class="pp" id="projPath"></span></button>
+    <span id="branchPill"></span>
+    <div class="grow"></div>
+    <button id="serveBtn"></button>
+    <button class="ghost" id="undoBtn"></button>
+    <button class="ghost" id="reloadBtn" title="Перечитать mkdocs.yml и git"></button>
+    <button class="hidden" id="updBtn" title="Обновление программы"></button>
+    <button class="theme-sw" id="themeSw" title="Светлая / темная тема" aria-label="Переключить тему"></button>
+  </header>
+
+  <main class="grid">
+    <section class="card tree-card">
+      <div class="card-head"><h2 id="leftTitle">Меню сайта</h2><span class="muted small" id="treeInfo"></span></div>
+      <div class="ptabs"><button data-pt="nav" class="on">Меню сайта</button><button data-pt="files">Файлы</button></div>
+      <div id="filesPane" class="hidden" style="display:flex;flex-direction:column;flex:1;min-height:0">
+        <div class="ftools">
+          <button id="fNewFile"></button><button id="fNewDir"></button>
+          <span class="grow"></span><span class="muted small">Файлы и папки можно перетаскивать мышью</span><button class="ghost" id="fRefresh" title="Обновить"></button>
+        </div>
+        <div id="ftree"></div>
+      </div>
+      <div id="navPane" style="display:flex;flex-direction:column;flex:1;min-height:0">
+      <div class="tree-tools">
+        <input type="text" id="search" placeholder="Поиск по разделам и страницам">
+        <button class="ghost" id="expandBtn" title="Развернуть все"></button>
+        <button class="ghost" id="collapseBtn" title="Свернуть"></button>
+        <button class="ghost" id="pagesBtn" title="Показать или скрыть страницы"></button>
+        <button class="ghost" id="ymlEditBtn" title="Открыть mkdocs.yml в редакторе"></button>
+      </div>
+      <div id="ymlErr"></div>
+      <div id="tree"></div>
+      </div>
+    </section>
+
+    <div class="split" id="mainSplit" title="Потяни, чтобы изменить ширину. Двойной щелчок: как было"></div>
+    <section class="side">
+      <div class="card" id="addCard">
+        <div class="card-head"><h2>Добавить страницу</h2></div>
+        <div class="step" id="st1"><div class="step-n">1</div><div class="step-b">
+          <div class="step-t">Файл</div>
+          <div class="drop" id="drop">
+            <span id="dropIco"></span>
+            <b>Перетащи .md сюда</b>
+            <div class="row" style="justify-content:center">
+              <button id="pickPc">Выбрать на компьютере</button>
+              <button id="pickDocs">Уже лежит в docs/</button>
+            </div>
+            <input type="file" id="fileInput" accept=".md,.markdown" class="hidden">
+          </div>
+          <div id="fileBox" class="hidden">
+            <div class="filebox"><span id="fbIco"></span><div class="grow" style="min-width:0"><div class="fn" id="fbName"></div><div class="small muted" id="fbSub"></div></div>
+              <button class="ghost" id="fileClear" title="Убрать файл"></button></div>
+            <label class="fl">Название в меню</label>
+            <input type="text" id="title">
+            <div id="dirWrap">
+              <label class="fl">Папка внутри <span class="docsName">docs</span>/</label>
+              <input type="text" id="dir" list="dirList" placeholder="подставится по выбранному разделу">
+              <datalist id="dirList"></datalist>
+            </div>
+            <div class="pathline"><span class="docsName">docs</span>/<b id="finalPath"></b></div>
+            <label class="check" id="owWrap"><input type="checkbox" id="overwrite"> Перезаписать файл, если такой уже есть</label>
+            <div id="already"></div>
+          </div>
+        </div></div>
+        <div class="step" id="st2"><div class="step-n">2</div><div class="step-b">
+          <div class="step-t">Куда</div>
+          <div id="chips"></div>
+        </div></div>
+        <div class="step" id="st3"><div class="step-n">3</div><div class="step-b">
+          <div class="step-t">Как</div>
+          <div class="seg" id="modeSeg"><button data-m="end" class="on">В конец раздела</button><button data-m="alpha">По порядку номеров</button></div>
+          <details id="subDet"><summary>Положить в новый подраздел</summary>
+            <input type="text" id="sub" placeholder="Например: Задание №5. Если такой есть, страница ляжет в него"></details>
+        </div></div>
+        <div class="add-foot"><span class="muted small" id="why"></span><button class="primary big" id="previewBtn" disabled>Проверить и добавить</button></div>
+      </div>
+
+      <div class="card" id="gitCard">
+        <div class="card-head"><h2>Git</h2><span id="gitPill"></span><div class="grow"></div><span class="muted small" id="gitUp"></span></div>
+        <div class="card-body" id="gitBody"></div>
+      </div>
+
+      <div class="card" id="checkCard">
+        <div class="card-head"><h2>Проверка</h2></div>
+        <div class="tabs2"><button data-t="orph" class="on">Нет в меню <span class="c" id="cOrph"></span></button><button data-t="miss">Битые ссылки <span class="c" id="cMiss"></span></button></div>
+        <div class="clist" id="clist"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden"><div class="modal-box">
+  <div class="modal-head"><h3 id="mTitle"></h3><button class="ghost" id="mClose"></button></div>
+  <div class="modal-body" id="mBody"></div>
+  <div class="modal-foot" id="mFoot"></div>
+</div></div>
+<div id="toasts"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const P = {
+  logo: '<path d="M4 6h16M4 12h10M4 18h7"/><path d="M17 15l2 2 3-4"/>',
+  folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
+  file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
+  up: '<path d="M12 19V5M6 11l6-6 6 6"/>', down: '<path d="M12 5v14M6 13l6 6 6-6"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="7" r="2"/><path d="M6 7v10M18 9c0 5-7 4-11 8"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>', check: '<path d="M5 12l5 5L20 7"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/>', chev: '<path d="M9 6l6 6-6 6"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>', arrowUp: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  expand: '<path d="M7 9l5 5 5-5"/><path d="M4 4h16"/>', collapse: '<path d="M7 15l5-5 5 5"/><path d="M4 20h16"/>',
+  eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  warn: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  commit: '<circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6"/>', push: '<path d="M12 20V8M6 13l6-6 6 6"/><path d="M5 4h14"/>',
+  link: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  preset: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/>',
+  redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
+  strike: '<path d="M4 12h16"/><path d="M16 6.5C15 5 13.5 4.5 12 4.5c-2.5 0-4 1.3-4 3 0 1.5 1 2.3 3 3"/><path d="M8 17.5c1 1.5 2.5 2 4 2 2.5 0 4-1.3 4-3 0-.8-.3-1.5-.9-2"/>',
+  eraser: '<path d="M7 21h10"/><path d="M5 15l8-8 6 6-6 6H9z"/><path d="M9 11l6 6"/>',
+  pilcrow: '<path d="M13 4v16M17 4v16M19 4H9.5a4.5 4.5 0 0 0 0 9H13"/>',
+  indent: '<path d="M3 5h18M11 10h10M11 14h10M3 19h18M3 9l4 3-4 3"/>',
+  quote: '<path d="M7 7H4v6h3l-1 4M17 7h-3v6h3l-1 4"/>',
+  ol: '<path d="M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>',
+  ul: '<path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  hr: '<path d="M3 12h18"/>',
+  sub: '<path d="M4 5l8 10M12 5l-8 10"/><path d="M15 19h5c0-1.5-5-2-5-4 0-1 1-1.5 2.5-1.5S20 14 20 15"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
+  block: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 10l-2 2 2 2M16 10l2 2-2 2"/>',
+  unlink: '<path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-5.5-5.8"/><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 5.5 5.8"/><path d="M4 4l16 16"/>',
+  filePlus: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M12 11v6M9 14h6"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/>',
+  maxi: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>', mini: '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>',
+  zoomIn: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5M11 8v6M8 11h6"/>', zoomOut: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5M8 11h6"/>',
+  code: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/>', save: '<path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/>',
+  folderPlus: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 11v5M9.5 13.5h5"/>',
+  download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/>',
+  merge: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 9c0 3 6 3 10 3"/>', play: '<path d="M7 4v16l13-8z"/>', stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', loader: '<path d="M12 3a9 9 0 1 0 9 9"/>', drive: '<rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5 13l2-8h10l2 8M7 17h.01"/>',
+};
+const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]}</svg>`;
+
+async function api(url, body) {
+  let r;
+  try {
+    r = await fetch(url, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)} : {});
+  } catch (e) {
+    // программа (окно run.bat) не отвечает: одна понятная плашка вместо «Failed to fetch»
+    showOffline();
+    const err = new Error("Нет связи с программой");
+    err.offline = true;
+    throw err;
+  }
+  hideOffline();
+  const j = await r.json().catch(() => ({error: r.statusText}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+let offlineTimer = null;
+function showOffline() {
+  if ($("#offline") || window._updating) return;
+  const el = document.createElement("div");
+  el.id = "offline";
+  el.innerHTML = `${ic("warn")}<span><b>Нет связи с программой.</b> Скорее всего, закрыто окно run.bat или программа перезапускается.
+    Запусти run.bat снова: страница переподключится сама, ничего не потеряется.</span>`;
+  document.body.appendChild(el);
+  clearInterval(offlineTimer);
+  offlineTimer = setInterval(async () => {
+    try {
+      const r = await fetch("/api/home", {cache: "no-store"});
+      if (r.ok) { hideOffline(); if (S) load(); toast("Связь с программой восстановлена", "info", 2500); }
+    } catch (e) {}
+  }, 2000);
+}
+function hideOffline() {
+  if (offlineTimer) { clearInterval(offlineTimer); offlineTimer = null; }
+  const el = $("#offline"); if (el) el.remove();
+}
+function toast(text, kind = "ok", ms = 3500, withUndo = false) {
+  if (text === "Нет связи с программой") return;  // про это уже говорит плашка сверху
+  if ([...document.querySelectorAll("#toasts .toast span")].some(s => s.textContent === text)) return;  // без дублей
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.innerHTML = (kind === "ok" ? ic("check") : kind === "err" ? ic("warn") : ic("info")) + `<span>${esc(text)}</span>`;
+  if (withUndo) {
+    // кнопка отката прямо в сообщении; старые такие сообщения убираем, чтобы откат относился к последнему действию
+    document.querySelectorAll(".toast.hasundo").forEach(x => x.remove());
+    el.classList.add("hasundo");
+    const b = document.createElement("button");
+    b.className = "tundo"; b.textContent = "Отменить";
+    b.onclick = () => { el.remove(); undoLast(); };
+    el.appendChild(b);
+  }
+  $("#toasts").appendChild(el);
+  setTimeout(() => el.remove(), kind === "err" ? 8000 : withUndo ? 10000 : ms);
+}
+const toastUndo = text => toast(text, "ok", 10000, true);
+function modal(title, body, buttons) {
+  svModal = false;
+  modalGuard = null;
+  resetModalBox();
+  $("#mTitle").textContent = title;
+  $("#mBody").innerHTML = body;
+  $("#mFoot").innerHTML = "";
+  (buttons || [{text: "Закрыть"}]).forEach(b => {
+    const el = document.createElement("button");
+    el.className = b.cls || ""; el.innerHTML = b.text; el.disabled = !!b.disabled;
+    el.onclick = async () => { if (b.onClick) { el.disabled = true; const keep = await b.onClick(); el.disabled = false; if (keep) return; } closeModal(); };
+    $("#mFoot").appendChild(el);
+  });
+  $("#modal").classList.remove("hidden");
+}
+let modalGuard = null;
+function closeModal(force) {
+  if (!force && modalGuard && !modalGuard()) return;
+  modalGuard = null;
+  svModal = false;
+  document.querySelectorAll(".pmenu").forEach(x => x.remove());
+  fpEl = null;
+  $("#modal").classList.add("hidden");
+  resetModalBox();
+}
+function resetModalBox() {
+  const box = document.querySelector(".modal-box");
+  if (window._edSave) { window._edSave(); window._edSave = null; }
+  box.classList.remove("wide", "full"); box.style.width = box.style.height = "";
+  $("#modal").classList.remove("fullmode");
+}
+$("#mClose").innerHTML = ic("x"); $("#mClose").onclick = () => closeModal();
+$("#modal").addEventListener("mousedown", e => { if (e.target.id === "modal") closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#modal").classList.contains("hidden")) closeModal(); });
+["#logo1", "#logo2"].forEach(s => $(s).innerHTML = ic("logo"));
+
+/* ================= выбор папки ================= */
+let browsePath = null;
+async function showPicker() {
+  $("#app").classList.add("hidden"); $("#pick").classList.remove("hidden");
+  $("#pickBack").classList.toggle("hidden", !S);
+  $("#pickBack").innerHTML = ic("back") + "Вернуться к проекту";
+  $("#brUp").innerHTML = ic("arrowUp");
+  try {
+    const h = await api("/api/home");
+    const card = r => `<button class="rcard" data-open="${esc(r.path)}"><b>${esc(r.name)}</b>
+      <span class="p">${esc(r.path)}</span>${r.branch ? `<span class="pill grey" style="margin-top:4px">${ic("branch")}${esc(r.branch)}</span>` : ""}</button>`;
+    $("#repoBlock").innerHTML =
+      (h.recent.length ? `<div class="sec-title">Недавние</div><div class="cards">${h.recent.map(card).join("")}</div>` : "") +
+      (h.found.length ? `<div class="sec-title">Найдено на рабочем столе</div><div class="cards">${h.found.map(card).join("")}</div>` : "");
+  } catch (e) { toast(e.message, "err"); }
+  browse(browsePath || "");
+}
+async function browse(path) {
+  let b;
+  try { b = await api("/api/browse?path=" + encodeURIComponent(path)); } catch (e) { toast(e.message, "err"); return; }
+  browsePath = b.path;
+  $("#places").innerHTML = b.places.map(p => `<button data-go="${esc(p.path)}">${ic("folder")}${esc(p.name)}</button>`).join("") +
+    b.drives.map(d => `<button data-go="${esc(d)}">${ic("drive")}${esc(d.replace("\\", ""))}</button>`).join("");
+  const parts = b.path.split(/[\\/]/).filter(Boolean);
+  let acc = "";
+  $("#brCrumbs").innerHTML = parts.map((p, i) => {
+    acc = i === 0 ? p + "\\" : acc.replace(/\\?$/, "\\") + p;
+    return (i ? `<span class="muted">${ic("chev")}</span>` : "") + `<span class="crumb" data-go="${esc(acc)}">${esc(p)}</span>`;
+  }).join("");
+  $("#brUp").disabled = !b.parent; $("#brUp").dataset.go = b.parent || "";
+  $("#brList").innerHTML = b.dirs.length ? b.dirs.map(d => `
+    <div class="br-item ${d.mkdocs ? "mk" : ""}" data-go="${esc(d.path)}">
+      <span style="color:${d.mkdocs ? "var(--green)" : "var(--muted)"}">${ic("folder")}</span><span class="nm">${esc(d.name)}</span>
+      ${d.mkdocs ? `<span class="pill ok">mkdocs</span><button class="primary" data-open="${esc(d.path)}">Открыть</button>` : ""}
+    </div>`).join("") : `<div class="empty">${ic("info")}Подпапок нет</div>`;
+  $("#brOpen").disabled = !b.here;
+  $("#brOpen").textContent = b.here ? "Открыть эту папку" : "Здесь нет mkdocs.yml";
+  $("#brInput").value = "";
+}
+$("#pick").addEventListener("click", e => {
+  const o = e.target.closest("[data-open]");
+  if (o) { e.stopPropagation(); openRepo(o.dataset.open); return; }
+  const g = e.target.closest("[data-go]");
+  if (g && g.dataset.go) browse(g.dataset.go);
+});
+$("#brOpen").onclick = () => openRepo(browsePath);
+$("#brGo").onclick = () => $("#brInput").value.trim() && browse($("#brInput").value.trim().replace(/^"|"$/g, ""));
+$("#brInput").addEventListener("keydown", e => { if (e.key === "Enter") $("#brGo").click(); });
+$("#pickBack").onclick = () => { $("#pick").classList.add("hidden"); $("#app").classList.remove("hidden"); };
+
+/* ================= состояние ================= */
+let S = null, K = [], byKey = {};
+let openK = new Set(), checkedK = new Set();
+let showPages = true, search = "";
+let src = null;                  // {kind:'upload', filename, content, size} | {kind:'repo', path, title}
+let titleTouched = false, dirTouched = false, mode = "end";
+let lastAdded = null, gitOut = null, checkTab = "orph";
+let pending = [];                // пустые разделы, которых еще нет в nav: {pk, title, dir}
+const VK = (pk, title) => "V" + pk + "\u0001" + title;
+
+function keyOf(id) {
+  const parts = []; let n = S.nodes[id];
+  while (n) { parts.unshift(n.path || n.title); n = n.parent === null ? null : S.nodes[n.parent]; }
+  return parts.join("\u0001");
+}
+function vOf(k) { return pending.find(v => VK(v.pk, v.title) === k); }
+// пустые разделы могут быть вложены друг в друга: поднимаемся до настоящего раздела и собираем цепочку названий
+function vChain(k) {
+  const titles = []; let cur = k, v;
+  while ((v = vOf(cur))) { titles.unshift(v.title); cur = v.pk; }
+  return {id: byKey[cur], key: cur, titles};
+}
+function targetOf(k) { if (!vOf(k)) return byKey[k]; const c = vChain(k); return {id: c.id, sub: c.titles}; }
+function crumbK(k) { if (!vOf(k)) return crumb(byKey[k]); const c = vChain(k); return crumb(c.id) + " › " + c.titles.join(" › "); }
+function vDescendants(k) { const out = [k]; pending.filter(v => v.pk === k).forEach(v => out.push(...vDescendants(VK(v.pk, v.title)))); return out; }
+function hintK(k) { const v = vOf(k); return v ? v.dir : (S.nodes[byKey[k]].hint || ""); }
+function crumb(id) {
+  const p = []; let n = S.nodes[id];
+  while (n && n.id !== 0) { p.unshift(n.title); n = S.nodes[n.parent]; }
+  return p.join(" › ") || "Корень меню";
+}
+async function openRepo(path) {
+  S = null; openK = new Set(); checkedK = new Set(); src = null; lastAdded = null; gitOut = null;
+  if (await load(path)) {
+    $("#pick").classList.add("hidden"); $("#app").classList.remove("hidden");
+    browsePath = path;
+    resetForm();
+  }
+}
+async function load(repo, flashKeys) {
+  let st;
+  try { st = await api("/api/state?repo=" + encodeURIComponent(repo || S.repo)); } catch (e) { toast(e.message, "err"); return false; }
+  const first = !S || S.repo !== st.repo;
+  S = st;
+  K = S.nodes.map(n => keyOf(n.id));
+  byKey = {}; K.forEach((k, i) => byKey[k] = i);
+  if (first) {
+    openK = new Set([K[0]]); S.nodes[0].children.forEach(c => { openK.add(K[c]); S.nodes[c].children.forEach(g => !S.nodes[g].path && openK.add(K[g])); });
+  }
+  // пустой раздел, в который уже добавили страницу, становится настоящим
+  for (let changed = true; changed;) {
+    changed = false;
+    pending = pending.filter(v => {
+      if (v.pk in byKey) {
+        const real = S.nodes[byKey[v.pk]].children.find(c => !S.nodes[c].path && S.nodes[c].title === v.title);
+        if (real === undefined) return true;
+        const vk = VK(v.pk, v.title), rk = K[real];
+        if (checkedK.has(vk)) { checkedK.delete(vk); checkedK.add(rk); }
+        pending.forEach(x => { if (x.pk === vk) x.pk = rk; });
+        openK.add(rk); changed = true;
+        return false;
+      }
+      if (pending.some(x => VK(x.pk, x.title) === v.pk)) return true;
+      changed = true;
+      return false;
+    });
+  }
+  checkedK = new Set([...checkedK].filter(k => k in byKey || pending.some(v => VK(v.pk, v.title) === k)));
+  document.title = "Nav Tool: " + S.name;
+  $("#projName").textContent = S.name; $("#projPath").textContent = S.repo;
+  document.querySelectorAll(".docsName").forEach(e => e.textContent = S.docs_dir);
+  $("#dirList").innerHTML = S.dirs.map(d => `<option value="${esc(d)}">`).join("");
+  $("#treeInfo").textContent = `${S.nodes.filter(n => n.path).length} страниц`;
+  renderTop(); renderYmlErr(); renderTree(flashKeys); renderForm(); renderGit(); renderChecks();
+  if (first) { ftCache = {}; ftOpen = new Set([""]); setLeftTab(prefGet("navtool.lefttab") || "nav"); }
+  else if (leftTab === "files") { ftCache = {}; renderFiles2(); }
+  return true;
+}
+function renderYmlErr() {
+  const e = S.yml_error;
+  if (!e) { $("#ymlErr").innerHTML = ""; return; }
+  const bad = new Set([e.line, e.ctx_line].filter(Boolean));
+  $("#ymlErr").innerHTML = `<div class="yerr">
+    <b>${ic("warn")} ${esc(S.yml)} сломан, mkdocs его не прочитает</b>
+    <div>Строка ${e.line}${e.ctx_line && e.ctx_line !== e.line ? ` (начало проблемы в строке ${e.ctx_line})` : ""}: ${esc(e.text)}</div>
+    <pre>${e.snippet.map(x => `<div class="${bad.has(x.n) ? "bad" : ""}"><span class="n">${x.n}</span>${esc(x.s) || " "}</div>`).join("")}</pre>
+    <div class="small" style="color:var(--text)">Обычно это пропущенное двоеточие, лишний или недостающий пробел в отступе или «: » внутри названия без кавычек.
+      Пока файл сломан, меню ниже может показываться неточно.</div>
+    ${e.fix ? `<div class="small" style="color:var(--text);margin-top:8px">Можно исправить автоматически: ${esc(e.fix.label)}, строка станет такой:
+      <pre style="margin:6px 0 0"><div><span class="n">${e.line}</span>${esc(e.fix.line)}</div></pre></div>` : ""}
+    <div class="row" style="margin-top:10px">
+      ${e.fix ? `<button class="primary" id="yFix">${ic("check")}Исправить</button>` : ""}
+      <button id="yEdit">${ic("code")}Открыть в редакторе</button>
+      <button id="yOpen">${ic("edit")}Открыть в Блокноте</button>
+      <button id="yReload">${ic("refresh")}Проверить снова</button>
+      ${S.undo.length ? `<button id="yUndo" title="${esc(S.undo[S.undo.length - 1])}">${ic("undo")}Отменить последнее действие</button>` : ""}
+    </div></div>`;
+  $("#yEdit").onclick = () => openEditor("@mkdocs.yml", e.line);
+  $("#yOpen").onclick = async () => { try { toast((await api("/api/open-yml", {repo: S.repo})).message, "info", 6000); } catch (x) { toast(x.message, "err"); } };
+  $("#yReload").onclick = () => load().then(ok => ok && !S.yml_error && toast("mkdocs.yml в порядке"));
+  if ($("#yUndo")) $("#yUndo").onclick = () => $("#undoBtn").click();
+  if ($("#yFix")) $("#yFix").onclick = async () => {
+    try { toastUndo((await api("/api/fix-yml", {repo: S.repo, sha: S.sha})).message); } catch (x) { toast(x.message, "err"); }
+    await load();
+  };
+}
+function renderTop() {
+  const g = S.git;
+  const master = g.is_repo && ["master", "main"].includes(g.branch);
+  $("#branchPill").innerHTML = g.is_repo ? `<span class="pill ${master ? "warn" : ""}" title="${master ? "Ты на основной ветке" : ""}">${ic("branch")}${esc(g.branch || "detached")}</span>` : "";
+  const n = S.undo.length;
+  $("#undoBtn").innerHTML = ic("undo") + "Отменить" + (n ? ` <span class="pill grey">${n}</span>` : "");
+  $("#undoBtn").disabled = !n;
+  $("#undoBtn").className = n ? "" : "ghost";
+  $("#undoBtn").title = n ? "Отменить: " + S.undo[n - 1] : "Пока нечего отменять";
+  $("#reloadBtn").innerHTML = ic("refresh");
+}
+$("#projBtn").onclick = showPicker;
+$("#reloadBtn").onclick = () => load().then(ok => ok && toast("Обновлено", "info", 1500));
+async function undoLast() {
+  try { const r = await api("/api/undo", {repo: S.repo}); toast(r.message); await load(); } catch (e) { toast(e.message, "err"); }
+}
+$("#undoBtn").onclick = undoLast;
+
+/* ================= дерево ================= */
+const countCache = {};
+function pageCount(id) { return S.nodes[id].children.reduce((a, c) => a + (S.nodes[c].path ? 1 : pageCount(c)), 0); }
+function hl(t, q) {
+  t = t || ""; if (!q) return esc(t);
+  const i = t.toLowerCase().indexOf(q);
+  return i < 0 ? esc(t) : esc(t.slice(0, i)) + "<mark>" + esc(t.slice(i, i + q.length)) + "</mark>" + esc(t.slice(i + q.length));
+}
+function renderTree(flashKeys) {
+  const q = search.trim().toLowerCase();
+  let vis = null;
+  if (q) {
+    vis = new Set();
+    S.nodes.forEach(n => {
+      if ((n.title || "").toLowerCase().includes(q) || (n.path || "").toLowerCase().includes(q)) {
+        let c = n; while (c) { vis.add(c.id); c = c.parent === null ? null : S.nodes[c.parent]; }
+      }
+    });
+  }
+  const cur = currentPath();
+  const out = [];
+  const walk = (id, d) => {
+    const n = S.nodes[id];
+    if (vis && !vis.has(id)) return;
+    if (n.path && !showPages && !q) return;
+    const sibs = n.parent === null ? [id] : S.nodes[n.parent].children;
+    const pos = sibs.indexOf(id);
+    const virt = n.path ? [] : pending.filter(v => v.pk === K[id]);
+    const isOpen = !n.path && (q ? true : openK.has(K[id]));
+    const hasKids = n.children.length + virt.length > 0;
+    const cls = ["tr", n.path ? "pg" : "sec", checkedK.has(K[id]) ? "on" : "", cur && n.path === cur ? "here" : "",
+                 flashKeys && flashKeys.includes(K[id]) ? "flash" : ""].join(" ");
+    out.push(`<div class="${cls}" data-id="${id}" style="--d:${d}">
+      ${n.path ? `<span class="tw"></span>` : `<button class="tw ${isOpen ? "open" : ""}" data-act="toggle" ${hasKids ? "" : "disabled"}>${hasKids ? ic("chev") : ""}</button>`}
+      ${n.path ? "" : `<input type="checkbox" data-act="check" ${checkedK.has(K[id]) ? "checked" : ""} title="Добавить сюда">`}
+      ${ic(n.path ? "file" : "folder", "ti")}
+      <span class="ttl">${hl(n.title, q)}</span>
+      ${n.path ? `<span class="pth" title="${esc(n.path)}">${hl(n.path, q)}</span>` : `<span class="cnt">${pageCount(id) || ""}</span>`}
+      ${!id ? `<span class="acts"><button data-act="newpage" title="Новая страница">${ic("filePlus")}</button><button data-act="addsec" title="Новый раздел внутри">${ic("folderPlus")}</button></span>` : ""}
+      ${id ? `<span class="acts">
+        ${n.path ? "" : `<button data-act="newpage" title="Новая страница в этом разделе">${ic("filePlus")}</button><button data-act="addsec" title="Новый раздел внутри">${ic("folderPlus")}</button>`}
+        ${n.path && SV.state === "running" && SV.repo === S.repo ? `<button data-act="site" title="Открыть на локальном сайте">${ic("ext")}</button>` : ""}
+        ${n.path && /\.(md|markdown)$/i.test(n.path) ? `<button data-act="editfile" title="Открыть в редакторе">${ic("code")}</button>` : ""}
+        <button data-act="rename" title="Переименовать">${ic("edit")}</button>
+        <button data-act="up" title="Выше" ${pos === 0 ? "disabled" : ""}>${ic("up")}</button>
+        <button data-act="down" title="Ниже" ${pos === sibs.length - 1 ? "disabled" : ""}>${ic("down")}</button>
+        <button data-act="delete" class="del" title="Убрать из меню">${ic("trash")}</button></span>` : ""}
+    </div>`);
+    if (isOpen) {
+      n.children.forEach(c => walk(c, d + 1));
+      const renderVirt = (pk, dd) => pending.filter(v => v.pk === pk).forEach(v => {
+        const k = VK(v.pk, v.title);
+        out.push(`<div class="tr sec virt ${checkedK.has(k) ? "on" : ""} ${flashKeys && flashKeys.includes(k) ? "flash" : ""}" data-v="${esc(k)}" style="--d:${dd}">
+          <span class="tw"></span><input type="checkbox" data-act="vcheck" ${checkedK.has(k) ? "checked" : ""} title="Добавить сюда">
+          ${ic("folder", "ti")}<span class="ttl">${esc(v.title)}</span>
+          <span class="pill grey" title="В mkdocs.yml появится вместе с первой страницей">пустой</span>
+          <span class="acts">
+            <button data-act="vnewpage" title="Новая страница в этом разделе">${ic("filePlus")}</button>
+            <button data-act="vaddsec" title="Новый раздел внутри">${ic("folderPlus")}</button>
+            <button data-act="vdel" class="del" title="Убрать пустой раздел">${ic("trash")}</button></span></div>`);
+        renderVirt(k, dd + 1);
+      });
+      if (!q) renderVirt(K[id], d + 1);
+    }
+  };
+  walk(0, 0);
+  $("#tree").innerHTML = out.join("") || `<div class="empty">${ic("info")}Ничего не найдено</div>`;
+  const f = $("#tree .flash"); if (f) f.scrollIntoView({block: "center", behavior: "smooth"});
+}
+function toggleKey(k, on) {
+  on ? checkedK.add(k) : checkedK.delete(k);
+  if (on && src && src.kind === "upload" && !dirTouched) $("#dir").value = hintK(k);
+  renderTree(); renderForm();
+}
+function toggleCheck(id, on) { toggleKey(K[id], on); }
+$("#tree").addEventListener("click", e => {
+  const row = e.target.closest(".tr"); if (!row || row.classList.contains("editing")) return;
+  if (row.dataset.v) {
+    const a = e.target.closest("[data-act]"), k = row.dataset.v;
+    if (a && a.dataset.act === "vcheck") toggleKey(k, a.checked);
+    else if (a && a.dataset.act === "vaddsec") newSection(k);
+    else if (a && a.dataset.act === "vnewpage") newPage(k);
+    else if (a && a.dataset.act === "vdel") {
+      const gone = new Set(vDescendants(k));
+      pending = pending.filter(v => !gone.has(VK(v.pk, v.title)));
+      gone.forEach(x => checkedK.delete(x));
+      renderTree(); renderForm();
+    }
+    return;
+  }
+  const id = +row.dataset.id, n = S.nodes[id];
+  const actEl = e.target.closest("[data-act]");
+  const act = actEl ? actEl.dataset.act : (n.path ? null : "toggle");
+  if (act === "check") { toggleCheck(id, actEl.checked); return; }
+  if (act === "toggle") { openK.has(K[id]) ? openK.delete(K[id]) : openK.add(K[id]); renderTree(); return; }
+  if (act === "site") { window.open(pageUrl(n.path), "_blank"); return; }
+  if (act === "editfile") return openEditor(n.path);
+  if (act === "addsec") return newSection(K[id]);
+  if (act === "newpage") return newPage(K[id]);
+  if (act === "rename") return startRename(row, id);
+  if (act === "up" || act === "down") return op(act, id);
+  if (act === "delete") return navDelete(id);
+});
+/* корзина в меню: пункт или раздел вместе с файлами страниц */
+async function navDelete(id) {
+  let d;
+  try { d = await api("/api/op", {repo: S.repo, op: "delete", id, files: true, dry: true}); } catch (e) { toast(e.message, "err"); return; }
+  const fl = d.files;
+  modal(d.is_page ? "Удалить страницу?" : "Удалить раздел?", `
+    <div>«<b>${esc(d.title)}</b>»${d.is_page ? "" : ` <span class="muted">раздел, страниц внутри: ${d.pages}</span>`}</div>
+    ${fl.length ? `<label class="check"><input type="checkbox" id="ndFiles" checked><span><b>Удалить и файлы с диска</b> (${fl.length})
+      <div class="muted small">${fl.slice(0, 8).map(f => esc(S.docs_dir + "/" + f)).join("<br>")}${fl.length > 8 ? "<br>и еще " + (fl.length - 8) : ""}</div></span></label>` : ""}
+    <div id="ndInfo"></div>
+    <div class="note info">${ic("info")}<span>Опустевшие разделы меню и папки на диске уберутся сами. Все откатывается кнопкой «Отменить» в сообщении внизу или вверху справа.</span></div>`,
+    [{text: "Оставить"}, {text: ic("trash") + "Удалить", cls: "danger", onClick: async () => {
+      const files = $("#ndFiles") ? $("#ndFiles").checked : false;
+      try {
+        const r = await api("/api/op", {repo: S.repo, sha: S.sha, op: "delete", id, files});
+        toastUndo(r.message);
+        ftCache = {};
+        await load(null, []);
+      } catch (e) { toast(e.message, "err"); return true; }
+    }}]);
+  const info = () => {
+    const on = $("#ndFiles") && $("#ndFiles").checked;
+    $("#ndInfo").innerHTML = !fl.length ? `<div class="note warn">${ic("info")}<span>Файлов страниц на диске нет, уберется только из меню.</span></div>`
+      : !on ? `<div class="note info">${ic("info")}<span>Уберется только из меню, файлы останутся на диске.</span></div>`
+      : `<div class="note warn">${ic("warn")}<span>${d.tracked ? `Файлов в git: ${d.tracked}. В коммите они удалятся и из репозитория.` : "Этих файлов нет в git, они просто исчезнут."}
+        ${d.other_nav.length ? `<br>Эти же файлы есть в меню еще в других местах (${d.other_nav.length}), оттуда они тоже уберутся.` : ""}
+        ${d.dirs.length ? `<br>Папки удалятся целиком, в них не останется страниц: ${d.dirs.map(x => "<b>" + esc(S.docs_dir + "/" + x) + "</b>").join(", ")}${d.extra ? `, вместе с прочими файлами (${d.extra}): ${d.extra_list.map(esc).join(", ")}${d.extra > d.extra_list.length ? " ..." : ""}` : ""}.` : ""}</span></div>`;
+  };
+  if ($("#ndFiles")) $("#ndFiles").onchange = info;
+  info();
+}
+const TR = {а:"a",б:"b",в:"v",г:"g",д:"d",е:"e",ё:"e",ж:"zh",з:"z",и:"i",й:"y",к:"k",л:"l",м:"m",н:"n",о:"o",п:"p",р:"r",с:"s",т:"t",у:"u",ф:"f",х:"h",ц:"c",ч:"ch",ш:"sh",щ:"sch",ъ:"",ы:"y",ь:"",э:"e",ю:"yu",я:"ya"};
+function slug(s) {
+  return s.toLowerCase().split("").map(c => TR[c] ?? c).join("").replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+}
+function newSection(pk) {
+  const isV = !!vOf(pk), ch = isV ? vChain(pk) : {id: byKey[pk], key: pk, titles: []};
+  const pid = ch.id;
+  const base = hintK(pk).replace(/\/+$/, "");
+  modal("Новый раздел", `
+    <div class="small muted">Внутри: <b>${esc(crumbK(pk))}</b></div>
+    <label class="fl">Название в меню</label><input type="text" id="nsTitle" placeholder="Например: Задание №5">
+    <label class="fl">Папка внутри ${esc(S.docs_dir)}/ (создастся на диске)</label><input type="text" id="nsDir" list="dirList" value="${esc(base)}">
+    <label class="check"><input type="radio" name="nsMode" value="empty" checked><span><b>Пустой раздел.</b> <span class="muted">Появится в дереве сразу, а в ${esc(S.yml)} запишется вместе с первой страницей (пустой раздел mkdocs не собирает).</span></span></label>
+    <label class="check"><input type="radio" name="nsMode" value="index"><span><b>Сразу со страницей «Главная».</b> <span class="muted">Создаст index.md с заголовком раздела и запишет раздел в ${esc(S.yml)}.</span></span></label>`,
+    [{text: "Отмена"}, {text: ic("folderPlus") + "Создать", cls: "primary", onClick: async () => {
+      const title = $("#nsTitle").value.trim(), dir = $("#nsDir").value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+      const withIndex = document.querySelector("input[name=nsMode]:checked").value === "index";
+      if (!title) { toast("Напиши название раздела", "err"); return true; }
+      if (pending.some(v => v.pk === pk && v.title === title)) { toast("Такой пустой раздел уже есть", "err"); return true; }
+      const rootKey = ch.key, path = [...ch.titles, title];
+      try {
+        const r = await api("/api/section", {repo: S.repo, sha: S.sha, parent: pid, chain: ch.titles, title, dir, with_index: withIndex});
+        withIndex ? toastUndo(r.message) : toast(r.message);
+        openK.add(rootKey);
+        if (withIndex) {
+          await load(null);
+          let node = S.nodes[byKey[rootKey]];
+          for (const tt of path) { if (!node) break; openK.add(K[node.id]); const c = node.children.find(x => !S.nodes[x].path && S.nodes[x].title === tt); node = c === undefined ? null : S.nodes[c]; }
+          if (node) { openK.add(K[node.id]); renderTree([K[node.id]]); }
+        } else {
+          pending.push({pk, title, dir});
+          checkedK.add(VK(pk, title));
+          if (src && src.kind === "upload" && !dirTouched) $("#dir").value = dir;
+          await load(null);
+          renderTree([VK(pk, title)]);
+        }
+      } catch (e) { toast(e.message, "err"); return true; }
+    }}]);
+  let dirTouchedNs = false;
+  $("#nsDir").oninput = () => { dirTouchedNs = true; };
+  $("#nsTitle").oninput = () => { if (!dirTouchedNs) $("#nsDir").value = (base ? base + "/" : "") + slug($("#nsTitle").value); };
+  withFolderPicker($("#nsDir"));
+  $("#nsTitle").onkeydown = e => { if (e.key === "Enter") document.querySelectorAll("#mFoot button")[1].click(); };
+  setTimeout(() => $("#nsTitle").focus(), 50);
+}
+function startRename(row, id) {
+  const n = S.nodes[id];
+  row.classList.add("editing");
+  const t = row.querySelector(".ttl");
+  t.innerHTML = `<input type="text" class="ren" value="${esc(n.title)}">`;
+  const inp = t.querySelector("input"); inp.focus(); inp.select();
+  let done = false;
+  const finish = save => {
+    if (done) return; done = true;
+    const v = inp.value.trim();
+    if (save && v && v !== n.title) op("rename", id, v); else renderTree();
+  };
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
+  inp.addEventListener("blur", () => finish(true));
+}
+async function op(kind, id, title) {
+  const n = S.nodes[id];
+  const parentKey = K[n.parent];
+  try {
+    const r = await api("/api/op", {repo: S.repo, sha: S.sha, op: kind, id, title});
+    const newKey = kind === "rename" ? parentKey + "\u0001" + (n.path || title) : K[id];
+    if (kind === "rename" && !n.path) {
+      [...openK].forEach(k => { if (k === K[id] || k.startsWith(K[id] + "\u0001")) { openK.delete(k); openK.add(newKey + k.slice(K[id].length)); } });
+      [...checkedK].forEach(k => { if (k === K[id]) { checkedK.delete(k); checkedK.add(newKey); } });
+    }
+    toastUndo(r.message);
+    await load(null, kind === "delete" ? [] : [newKey]);
+  } catch (e) { toast(e.message, "err"); renderTree(); }
+}
+let st;
+$("#search").addEventListener("input", e => { search = e.target.value; clearTimeout(st); st = setTimeout(renderTree, 120); });
+$("#expandBtn").onclick = () => { S.nodes.forEach(n => !n.path && openK.add(K[n.id])); renderTree(); };
+$("#collapseBtn").onclick = () => { openK = new Set([K[0]]); S.nodes[0].children.forEach(c => openK.add(K[c])); renderTree(); };
+$("#pagesBtn").onclick = () => { showPages = !showPages; $("#pagesBtn").style.opacity = showPages ? 1 : .5; renderTree(); };
+$("#ymlEditBtn").innerHTML = ic("code");
+$("#ymlEditBtn").onclick = () => openEditor("@mkdocs.yml");
+$("#expandBtn").innerHTML = ic("expand"); $("#collapseBtn").innerHTML = ic("collapse"); $("#pagesBtn").innerHTML = ic("eye");
+
+/* ================= ползунки ширины ================= */
+const memPrefs = {};
+function prefGet(k) { try { const v = localStorage.getItem(k); if (v !== null) return v; } catch (e) {} return memPrefs[k] ?? null; }
+function prefSet(k, v) { memPrefs[k] = v; try { localStorage.setItem(k, v); } catch (e) {} }
+function makeSplitter(split, box, cssVar, key, def, min, max) {
+  const apply = v => box.style.setProperty(cssVar, v + "%");
+  const saved = parseFloat(prefGet(key));
+  apply(isNaN(saved) ? def : saved);
+  split.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    split.setPointerCapture(e.pointerId);
+    split.classList.add("drag"); document.body.classList.add("dragging");
+    const r = box.getBoundingClientRect();
+    const move = ev => {
+      const pct = Math.min(max, Math.max(min, (ev.clientX - r.left) / r.width * 100));
+      apply(pct.toFixed(1)); prefSet(key, pct.toFixed(1));
+    };
+    const up = () => {
+      split.classList.remove("drag"); document.body.classList.remove("dragging");
+      split.removeEventListener("pointermove", move); split.removeEventListener("pointerup", up); split.removeEventListener("pointercancel", up);
+    };
+    split.addEventListener("pointermove", move); split.addEventListener("pointerup", up); split.addEventListener("pointercancel", up);
+  });
+  split.addEventListener("dblclick", () => { apply(def); prefSet(key, String(def)); });
+}
+makeSplitter($("#mainSplit"), document.querySelector(".grid"), "--lw", "navtool.lw", 53, 22, 78);
+
+/* ================= обновление программы ================= */
+let updInfo = null;
+async function checkUpdate(fetchRemote = true) {
+  try { updInfo = await api("/api/selfupdate?fetch=" + (fetchRemote ? "1" : "0")); } catch (e) { return; }
+  const b = $("#updBtn");
+  if (!updInfo.git) { b.classList.add("hidden"); return; }
+  b.classList.remove("hidden");
+  b.classList.toggle("has", updInfo.behind > 0);
+  b.className = updInfo.behind > 0 ? "has" : "ghost";
+  b.innerHTML = ic("download") + (updInfo.behind > 0 ? `Обновить программу (${updInfo.behind})` : "");
+  b.title = "Версия программы: " + (updInfo.version || "?") + (updInfo.behind > 0 ? ". Есть обновление" : ". Обновлений нет (проверить еще раз)");
+}
+$("#updBtn").onclick = async () => {
+  if (!updInfo || !updInfo.behind) { await checkUpdate(true); toast(updInfo && updInfo.behind ? "Есть обновление" : "Обновлений нет, версия " + (updInfo?.version || ""), "info"); return; }
+  modal("Обновить программу?", `<div>Сейчас: <b>${esc(updInfo.version)}</b>. Новых изменений: <b>${updInfo.behind}</b></div>
+    ${updInfo.changes.length ? `<div class="glist" style="margin-top:8px">${updInfo.changes.map(c => `<div class="gl"><span class="fp">${esc(c)}</span></div>`).join("")}</div>` : ""}
+    <div class="note info">${ic("info")}<span>Программа скачает новую версию и перезапустится сама, страница обновится. Твои настройки, шаблоны и копии для отката останутся.</span></div>`,
+    [{text: "Позже"}, {text: ic("download") + "Обновить", cls: "primary", onClick: async () => {
+      try {
+        const r = await api("/api/selfupdate", {});
+        toast(r.message, "info", 6000);
+        window._updating = true;
+        const t0 = Date.now();
+        await new Promise(res => setTimeout(res, 2000));
+        while (Date.now() - t0 < 60000) {
+          try { const x = await fetch("/api/home", {cache: "no-store"}); if (x.ok) { location.reload(); return; } } catch (e) {}
+          await new Promise(res => setTimeout(res, 1000));
+        }
+      } catch (e) { toast(e.message, "err"); }
+    }}]);
+};
+setTimeout(() => checkUpdate(true), 3000);
+setInterval(() => checkUpdate(true), 30 * 60 * 1000);
+
+/* ================= тема ================= */
+const isDark = () => document.documentElement.dataset.theme === "dark";
+function setTheme(th) {
+  document.documentElement.dataset.theme = th;
+  try { localStorage.setItem("navtool.theme", th); } catch (e) {}
+  $("#themeSw").classList.toggle("dark", th === "dark");
+  // диаграммы Mermaid перерисуются в новой теме
+  if (window.mermaid && mermaidState === "ok") { try { window.mermaid.initialize({startOnLoad: false, securityLevel: "strict", theme: th === "dark" ? "dark" : "default"}); } catch (e) {} }
+  mermaidCache.clear();
+}
+$("#themeSw").classList.toggle("dark", isDark());
+$("#themeSw").onclick = () => setTheme(isDark() ? "light" : "dark");
+
+/* ================= Mermaid в предпросмотре ================= */
+// в предпросмотре скрипты запрещены, поэтому диаграмму рисуем здесь и вставляем туда готовый SVG
+let mermaidState = null;  // null, "loading", "ok", "fail"
+const mermaidCache = new Map();  // текст диаграммы + тема -> svg или ошибка
+let mermaidSeq = 0;
+function loadMermaid() {
+  if (mermaidState === "ok" || mermaidState === "fail") return Promise.resolve(mermaidState);
+  if (window._mermaidLoading) return window._mermaidLoading;
+  mermaidState = "loading";
+  window._mermaidLoading = new Promise(res => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js";
+    s.onload = () => {
+      try {
+        window.mermaid.initialize({startOnLoad: false, securityLevel: "strict",
+          theme: isDark() ? "dark" : "default"});
+        mermaidState = "ok";
+      } catch (e) { mermaidState = "fail"; }
+      res(mermaidState);
+    };
+    s.onerror = () => { mermaidState = "fail"; res(mermaidState); };
+    setTimeout(() => { if (mermaidState === "loading") { mermaidState = "fail"; res(mermaidState); } }, 10000);
+    document.head.appendChild(s);
+  });
+  return window._mermaidLoading;
+}
+async function renderMermaidIn(doc) {
+  const blocks = [...doc.querySelectorAll("pre.mermaid, pre > code.language-mermaid")].map(el => el.closest("pre") || el);
+  if (!blocks.length) return;
+  const st = await loadMermaid();
+  for (const pre of blocks) {
+    if (!pre.isConnected) continue;
+    const code = pre.textContent.trim();
+    const box = doc.createElement("div");
+    box.className = "mmd";
+    if (st !== "ok") {
+      box.innerHTML = `<div class="mmd-err">Диаграмма Mermaid не отрисована: библиотека не загрузилась (нужен интернет). На сайте она будет.</div>`;
+      pre.before(box);
+      continue;
+    }
+    let res = mermaidCache.get(code);
+    if (!res) {
+      try {
+        const out = await window.mermaid.render("mmd" + (++mermaidSeq), code);
+        res = {svg: out.svg};
+      } catch (e) {
+        res = {err: String(e && e.message || e).split("\n").slice(0, 3).join("\n")};
+        document.querySelectorAll("body > [id^='dmmd']").forEach(x => x.remove());  // хвосты неудачного рендера
+      }
+      if (mermaidCache.size > 50) mermaidCache.delete(mermaidCache.keys().next().value);
+      mermaidCache.set(code, res);
+    }
+    if (!pre.isConnected) continue;
+    box.innerHTML = res.svg || `<div class="mmd-err">Ошибка в диаграмме Mermaid: ${esc(res.err)}</div>`;
+    pre.replaceWith(box);
+  }
+}
+
+/* ================= редактор файлов ================= */
+let markedState = null;   // null - не грузили, "loading", "ok", "fail"
+function loadMarked(cb) {
+  if (markedState === "ok" || markedState === "fail") return cb();
+  if (markedState === "loading") return setTimeout(() => loadMarked(cb), 200);
+  markedState = "loading";
+  const s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js";
+  s.onload = () => { markedState = window.marked ? "ok" : "fail"; cb(); };
+  s.onerror = () => { markedState = "fail"; cb(); };
+  setTimeout(() => { if (markedState === "loading") { markedState = "fail"; cb(); } }, 6000);
+  document.head.appendChild(s);
+}
+function previewHtml(md) {
+  const body = md.replace(/^﻿/, "").replace(/^---\n[\s\S]*?\n---\n?/, "");
+  return markedState === "ok" ? window.marked.parse(body) : "<pre>" + esc(body) + "</pre>";
+}
+function previewShell() {
+  const dark = isDark();
+  return `<!doctype html><meta charset="utf-8"><style>
+    body{font:15px/1.6 "Segoe UI",system-ui,sans-serif;margin:16px 20px;color:${dark ? "#e7e9ee" : "#1d2330"};background:${dark ? "#171a22" : "#fff"}}
+    h1,h2,h3{line-height:1.3} code{background:${dark ? "#262b36" : "#f1f3f6"};padding:1px 4px;border-radius:4px;font-size:.87em}
+    pre{background:${dark ? "#262b36" : "#f1f3f6"};padding:10px;border-radius:8px;overflow:auto} pre code{background:none;padding:0}
+    table{border-collapse:collapse} td,th{border:1px solid ${dark ? "#3a4150" : "#d5d9e0"};padding:4px 8px}
+    blockquote{border-left:3px solid #8b85ff;margin:0;padding-left:12px;color:#888} img{max-width:100%}
+    a{color:#4f46e5}
+    .admonition,details{border-left:4px solid #448aff;background:${dark ? "#1f2533" : "#f3f6ff"};padding:8px 12px;margin:12px 0;border-radius:4px}
+    .admonition-title,summary{font-weight:700;margin:0 0 6px} .highlight{margin:12px 0}
+    .mmd{margin:12px 0;overflow:auto;text-align:center} .mmd svg{max-width:100%;height:auto}
+    .mmd-err{color:#d32f2f;border:1px dashed #d32f2f;border-radius:6px;padding:8px 10px;white-space:pre-wrap;font-size:.85em;text-align:left}</style><body></body>`;
+}
+function fileInfo(path) {
+  if (path === "@mkdocs.yml") return {name: S.yml, folder: "корень репозитория", title: S.yml, menu: []};
+  const i = path.lastIndexOf("/");
+  const name = path.slice(i + 1), dir = i >= 0 ? path.slice(0, i) : "";
+  const menu = S.nodes.filter(n => n.path === path).map(n => ({title: n.title, crumb: crumb(n.parent)}));
+  return {name, folder: S.docs_dir + (dir ? "/" + dir : ""), title: menu.length ? menu[0].title : name, menu};
+}
+/* ================= шаблоны для md ================= */
+const mdTable = (cols, rows) => {
+  const head = "| " + Array.from({length: cols}, (_, i) => "Колонка " + (i + 1)).join(" | ") + " |";
+  const sep = "|" + Array.from({length: cols}, () => "---").join("|") + "|";
+  const row = "| " + Array.from({length: cols}, () => " ").join(" | ") + " |";
+  return [head, sep, ...Array.from({length: rows}, () => row)].join("\n") + "\n";
+};
+// Тексты шаблонов в программе не хранятся: они у каждого свои (config.json) и переносятся одним файлом
+// (меню «Шаблоны» -> «Сохранить шаблоны в файл» / «Загрузить шаблоны из файла»). Встроен только генератор таблицы.
+const PRESETS = [{g: "Таблица", n: "Таблица своего размера", d: "задать число колонок и строк", form: "table"}];
+const TPL_FORMAT = "navtool-templates";
+const fillTpl = (text, c) => String(text).replace(/\{\{(LES|NAME|TITLE|DATE)\}\}/g, (m, k) => ({LES: c.les, NAME: c.name, TITLE: c.title, DATE: c.date})[k]);
+let userPresets = null;
+async function loadUserPresets() { try { userPresets = (await api("/api/presets")).presets; } catch (e) { userPresets = []; } }
+
+async function openEditor(path, gotoLine) {
+  let f;
+  try { f = await api("/api/file?repo=" + encodeURIComponent(S.repo) + "&path=" + encodeURIComponent(path)); }
+  catch (e) { toast(e.message, "err"); return; }
+  const isMd = /\.(md|markdown)$/i.test(f.name);
+  const info = fileInfo(path);
+  let saved = f.content, sha = f.sha;
+  let zoom = parseFloat(prefGet("navtool.edzoom")) || 1;
+  const running = SV.state === "running" && SV.repo === S.repo && isMd;
+  modal("Редактор", `
+    <div class="ed-head">
+      <div class="grow" style="min-width:0">
+        <div class="ttl2">${ic(isMd ? "file" : "code")}<span>${esc(info.title)}</span><span id="edDirty"></span></div>
+        <div class="ed-meta">
+          ${info.menu.length ? info.menu.map(m => `<span>${ic("folder")}В меню: <b>${esc(m.crumb)} › ${esc(m.title)}</b></span>`).join("")
+            : isMd ? `<span class="pill warn">нет в меню</span>` : ""}
+          <span>${ic("folder")}Папка: <b>${esc(info.folder)}</b></span>
+          <span>${ic("file")}Файл: <b>${esc(info.name)}</b></span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="zoom" title="Масштаб: Ctrl + колесо мыши, Ctrl+= / Ctrl+-, Ctrl+0">
+          <button id="edZo">${ic("zoomOut")}</button><span id="edZv"></span><button id="edZi">${ic("zoomIn")}</button></div>
+        ${isMd ? `<label class="check" style="margin:0" title="Текст и предпросмотр прокручиваются вместе, по заголовкам"><input type="checkbox" id="edSync"> Синхронная прокрутка</label>` : ""}
+        <button class="ghost" id="edFull" title="Во весь экран"></button>
+        <span class="muted small">Ctrl+S сохранить</span>
+      </div>
+    </div>
+    <div class="mdbar" id="edBar">
+      <button data-md="undo" title="Отменить (Ctrl+Z)">${ic("undo")}</button><button data-md="redo" title="Вернуть (Ctrl+Y)">${ic("redo")}</button>
+      ${isMd ? `<span class="sep"></span>
+      <button data-md="bold" title="Жирный (Ctrl+B)" style="font-weight:800;font-family:Georgia,serif;font-size:15px">B</button>
+      <button data-md="italic" title="Курсив (Ctrl+I)" style="font-style:italic;font-family:Georgia,serif;font-size:15px">I</button>
+      <button data-md="strike" title="Зачеркнутый">${ic("strike")}</button>
+      <button data-md="clear" title="Убрать форматирование в выделении">${ic("eraser")}</button>
+      <span class="sep"></span>
+      <button data-md="para" title="Обычный текст (убрать заголовок)">${ic("pilcrow")}</button>
+      <button data-md="indent" title="Отступ 4 пробела">${ic("indent")}</button>
+      ${[1, 2, 3, 4, 5, 6].map(n => `<button class="h" data-md="h${n}" title="Заголовок ${n}">H<sub>${n}</sub></button>`).join("")}
+      <span class="sep"></span>
+      <button data-md="quote" title="Цитата">${ic("quote")}</button>
+      <button data-md="ol" title="Нумерованный список">${ic("ol")}</button>
+      <button data-md="ul" title="Маркированный список">${ic("ul")}</button>
+      <button data-md="hr" title="Горизонтальная линия">${ic("hr")}</button>
+      <span class="sep"></span>
+      <button data-md="sub" title="Нижний индекс">${ic("sub")}</button>
+      <button data-md="table" title="Таблица (правильная для mkdocs)">${ic("table")}</button>
+      <button data-md="codeblock" title="Блок кода">${ic("block")}</button>
+      <button data-md="code" title="Код в строке">${ic("code")}</button>
+      <button data-md="link" title="Ссылка (Ctrl+K)">${ic("link")}</button>
+      <button data-md="unlink" title="Убрать ссылку, оставить текст">${ic("unlink")}</button>
+      <button data-md="image" title="Картинка">${ic("image")}</button>
+      <span class="sep"></span>
+      <button class="pbtn" data-md="presets" title="Готовые заготовки для страниц и блоков">${ic("preset")}Шаблоны</button>` : ""}
+    </div>
+    <div class="ed ${isMd ? "" : "nopv"}">
+      <div class="ed-code"><div class="gut" id="edGut"></div><textarea id="edText" spellcheck="false" wrap="off"></textarea></div>
+      ${isMd ? `<div class="split" id="edSplit" title="Потяни, чтобы изменить ширину. Двойной щелчок: пополам"></div>` : ""}
+      ${isMd ? `<div class="pv"><div class="pvh" id="edPvH">Предпросмотр</div><iframe id="edPv" sandbox="allow-same-origin"></iframe></div>` : ""}
+    </div>`,
+    [{text: "Закрыть"},
+     ...(running ? [{text: ic("ext") + "На сайте", onClick: () => { window.open(pageUrl(path), "_blank"); return true; }}] : []),
+     {text: ic("save") + "Сохранить", cls: "primary", onClick: () => { save(); return true; }}]);
+  const box = document.querySelector(".modal-box");
+  box.classList.add("wide");
+  // размер окна: тянуть за правый нижний угол, запоминается; кнопка - во весь экран
+  const size = (prefGet("navtool.edsize") || "").split("x").map(Number);
+  if (size[0] > 0 && size[1] > 0) { box.style.width = Math.min(size[0], innerWidth * .98) + "px"; box.style.height = Math.min(size[1], innerHeight * .98) + "px"; }
+  const setFull = on => {
+    box.classList.toggle("full", on); $("#modal").classList.toggle("fullmode", on);
+    $("#edFull").innerHTML = ic(on ? "mini" : "maxi"); $("#edFull").title = on ? "Обычный размер" : "Во весь экран";
+    prefSet("navtool.edfull", on ? "1" : "0");
+  };
+  setFull(prefGet("navtool.edfull") === "1");
+  $("#edFull").onclick = () => setFull(!box.classList.contains("full"));
+  // запоминаем размер, заданный руками (растягивание за угол пишет его в style): при отпускании мыши и при закрытии
+  const saveSize = () => { if (box.classList.contains("wide") && !box.classList.contains("full") && box.style.width) prefSet("navtool.edsize", Math.round(box.offsetWidth) + "x" + Math.round(box.offsetHeight)); };
+  window._edSave = saveSize;
+  box.addEventListener("mouseup", saveSize);
+  const ta = $("#edText"), gut = $("#edGut"), fr = $("#edPv");
+  if ($("#edSplit")) makeSplitter($("#edSplit"), document.querySelector(".ed"), "--ew", "navtool.ew", 50, 20, 80);
+  ta.value = f.content;
+  const isDirty = () => ta.value !== saved;
+  const lines = () => { const n = ta.value.split("\n").length; gut.textContent = Array.from({length: n}, (_, i) => i + 1).join("\n"); };
+  const pvDoc = () => { try { return fr && fr.contentDocument && fr.contentDocument.body ? fr.contentDocument : null; } catch (e) { return null; } };
+  const applyZoom = () => {
+    zoom = Math.min(2.5, Math.max(0.6, Math.round(zoom * 10) / 10));
+    prefSet("navtool.edzoom", String(zoom));
+    ta.style.fontSize = gut.style.fontSize = (13 * zoom) + "px";
+    $("#edZv").textContent = Math.round(zoom * 100) + "%";
+    const d = pvDoc(); if (d) d.body.style.fontSize = (15 * zoom) + "px";
+    gut.scrollTop = ta.scrollTop;
+  };
+  const onWheel = e => { if (e.ctrlKey) { e.preventDefault(); zoom += e.deltaY < 0 ? 0.1 : -0.1; applyZoom(); } };
+  // предпросмотр: каркас грузится один раз, дальше меняется только содержимое, поэтому прокрутка остается на месте
+  let pvTimer, pvReady = false;
+  // сначала тот же движок, что у mkdocs (Python-Markdown с расширениями из mkdocs.yml), без него marked
+  let engine = null;
+  const renderHtml = async () => {
+    if (engine !== "marked") {
+      try {
+        const r = await api("/api/render", {repo: S.repo, text: ta.value});
+        if (r.html !== undefined) {
+          if (engine !== "mkdocs") { engine = "mkdocs"; $("#edPvH").textContent = "Как на сайте: тот же движок Markdown и расширения, что у mkdocs" + (r.skipped && r.skipped.length ? " (кроме " + r.skipped.join(", ") + ")" : ""); }
+          return r.html;
+        }
+      } catch (e) {}
+      engine = "marked";
+      $("#edPvH").textContent = "Примерный вид (движок mkdocs еще не установлен: нажми «Проверить локально» один раз)";
+    }
+    await new Promise(res => loadMarked(res));
+    return previewHtml(ta.value);
+  };
+  const pvRender = async () => {
+    if (!fr || !document.body.contains(fr)) return;
+    const html = await renderHtml(), d = pvDoc();
+    if (!document.body.contains(fr)) return;
+    if (pvReady && d) { d.body.innerHTML = html; renderMermaidIn(d); return; }
+    fr.onload = () => {
+      pvReady = true;
+      const d2 = pvDoc(); if (!d2) return;
+      d2.body.innerHTML = html;
+      renderMermaidIn(d2);
+      d2.body.style.fontSize = (15 * zoom) + "px";
+      d2.addEventListener("wheel", onWheel, {passive: false});
+      d2.addEventListener("scroll", onPvScroll);
+    };
+    fr.srcdoc = previewShell();
+  };
+  const pv = () => { if (!isMd) return; clearTimeout(pvTimer); pvTimer = setTimeout(pvRender, 250); };
+  // синхронная прокрутка: опорные точки - заголовки (строка в тексте <-> заголовок в предпросмотре), между ними плавно
+  let syncOn = isMd && prefGet("navtool.sync") !== "0", syncLock = null, syncT = null;
+  if ($("#edSync")) {
+    $("#edSync").checked = syncOn;
+    $("#edSync").onchange = e => { syncOn = e.target.checked; prefSet("navtool.sync", syncOn ? "1" : "0"); if (syncOn) onTaScroll(); };
+  }
+  const srcHeadLines = () => {
+    const ls = ta.value.split("\n"), out = [];
+    let i = 0, fence = false;
+    if (ls[0] && ls[0].trim() === "---") { i = ls.findIndex((l, k) => k > 0 && /^(---|\.\.\.)\s*$/.test(l)) + 1 || 0; }
+    for (; i < ls.length; i++) {
+      if (/^\s*(```|~~~)/.test(ls[i])) { fence = !fence; continue; }
+      if (!fence && /^#{1,6}\s+\S/.test(ls[i])) out.push(i);
+    }
+    return out;
+  };
+  const anchors = () => {
+    const d = pvDoc(); if (!d) return null;
+    const se = d.scrollingElement, hs = [...d.body.querySelectorAll("h1,h2,h3,h4,h5,h6")], sl = srcHeadLines();
+    const total = ta.value.split("\n").length, maxY = Math.max(0, se.scrollHeight - d.defaultView.innerHeight);
+    const pairs = [[0, 0]];
+    for (let i = 0; i < Math.min(hs.length, sl.length); i++) {
+      const y = Math.max(0, hs[i].getBoundingClientRect().top + se.scrollTop - 8);
+      const last = pairs[pairs.length - 1];
+      if (sl[i] > last[0] && y >= last[1]) pairs.push([sl[i], y]);
+    }
+    const last = pairs[pairs.length - 1];
+    if (total > last[0]) pairs.push([total, Math.max(maxY, last[1])]);
+    return pairs;
+  };
+  const interp = (pairs, x, a, b) => {
+    for (let i = 1; i < pairs.length; i++) {
+      if (x <= pairs[i][a] || i === pairs.length - 1) {
+        const p = pairs[i - 1], q = pairs[i], span = q[a] - p[a];
+        return p[b] + (span > 0 ? (x - p[a]) / span : 0) * (q[b] - p[b]);
+      }
+    }
+    return 0;
+  };
+  const release = () => { clearTimeout(syncT); syncT = setTimeout(() => { syncLock = null; }, 80); };
+  const onTaScroll = () => {
+    if (!syncOn || syncLock === "pv") return;
+    const pairs = anchors(); if (!pairs) return;
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+    syncLock = "ta";
+    pvDoc().scrollingElement.scrollTop = interp(pairs, ta.scrollTop / lh, 0, 1);
+    release();
+  };
+  const onPvScroll = () => {
+    if (!syncOn || syncLock === "ta") return;
+    const pairs = anchors(); if (!pairs) return;
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+    syncLock = "pv";
+    ta.scrollTop = interp(pairs, pvDoc().scrollingElement.scrollTop, 1, 0) * lh;
+    release();
+  };
+  const mark = () => { $("#edDirty").innerHTML = isDirty() ? `<span class="pill warn"><span class="dirty-dot"></span>не сохранено</span>` : ""; };
+  async function save() {
+    try {
+      const r = await api("/api/file", {repo: S.repo, path, content: ta.value, sha});
+      saved = ta.value; sha = r.sha; mark();
+      toastUndo("Сохранено" + (SV.state === "running" ? ". Локальный сайт пересоберется сам" : ""));
+      load();
+    } catch (e) { toast(e.message, "err"); }
+  }
+  modalGuard = () => !isDirty() || confirm("Есть несохраненные правки. Закрыть без сохранения?");
+  // вставка через execCommand, чтобы работали Ctrl+Z / Ctrl+Y
+  const insert = text => {
+    ta.focus();
+    if (!document.execCommand("insertText", false, text)) {
+      ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, "end");
+      ta.dispatchEvent(new Event("input"));
+    }
+  };
+  const replaceRange = (s, e, text, selS, selE) => {
+    ta.setSelectionRange(s, e); insert(text);
+    ta.setSelectionRange(selS ?? s, selE ?? s + text.length);
+  };
+  const wrap = (before, after, ph) => {
+    const s = ta.selectionStart, e = ta.selectionEnd, v = ta.value, sel = v.slice(s, e);
+    if (sel && v.slice(s - before.length, s) === before && v.slice(e, e + after.length) === after)
+      return replaceRange(s - before.length, e + after.length, sel);
+    if (sel.length > before.length + after.length && sel.startsWith(before) && sel.endsWith(after))
+      return replaceRange(s, e, sel.slice(before.length, sel.length - after.length));
+    const body = sel || ph;
+    replaceRange(s, e, before + body + after, s + before.length, s + before.length + body.length);
+  };
+  const lineRange = () => {
+    const v = ta.value, s = v.lastIndexOf("\n", ta.selectionStart - 1) + 1;
+    let e = v.indexOf("\n", Math.max(ta.selectionEnd - (ta.selectionEnd > ta.selectionStart && v[ta.selectionEnd - 1] === "\n" ? 1 : 0), s));
+    return [s, e < 0 ? v.length : e];
+  };
+  const eachLine = fn => { const [s, e] = lineRange(); replaceRange(s, e, ta.value.slice(s, e).split("\n").map(fn).join("\n")); };
+  const block = (text, selFrom, selLen) => {
+    const s = ta.selectionStart, e = ta.selectionEnd, before = ta.value.slice(0, s), after = ta.value.slice(e);
+    const pre = before === "" || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+    const post = after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+    const base = s + pre.length;
+    replaceRange(s, e, pre + text + post, base + (selFrom ?? text.length), base + (selFrom ?? text.length) + (selLen ?? 0));
+  };
+  const heading = n => eachLine(l => {
+    const m = l.match(/^(#{1,6})\s+/), body = l.replace(/^#{1,6}\s+/, "");
+    return m && m[1].length === n ? body : "#".repeat(n) + " " + body;
+  });
+  const MD = {
+    undo: () => { ta.focus(); document.execCommand("undo"); },
+    redo: () => { ta.focus(); document.execCommand("redo"); },
+    bold: () => wrap("**", "**", "жирный текст"),
+    italic: () => wrap("*", "*", "курсив"),
+    strike: () => wrap("~~", "~~", "зачеркнутый"),
+    code: () => wrap("`", "`", "код"),
+    sub: () => wrap("<sub>", "</sub>", "индекс"),
+    clear: () => {
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      if (s === e) { toast("Выдели текст, с которого убрать форматирование", "info"); return; }
+      replaceRange(s, e, ta.value.slice(s, e).replace(/\*\*|__|~~|`|<\/?sub>/g, "").replace(/(^|[^*])\*(?!\*)/g, "$1"));
+    },
+    para: () => eachLine(l => l.replace(/^#{1,6}\s+/, "").replace(/^>\s?/, "")),
+    indent: () => eachLine(l => "    " + l),
+    quote: () => eachLine(l => l.startsWith(">") ? l.replace(/^>\s?/, "") : "> " + l),
+    ul: () => eachLine(l => /^\s*[-*+] /.test(l) ? l.replace(/^(\s*)[-*+] /, "$1") : "- " + l),
+    ol: () => { let i = 0; eachLine(l => /^\s*\d+\. /.test(l) ? l.replace(/^(\s*)\d+\. /, "$1") : (++i) + ". " + l); },
+    hr: () => block("---"),
+    table: () => block("| Колонка 1 | Колонка 2 | Колонка 3 |\n|---|---|---|\n|  |  |  |\n|  |  |  |", 2, 9),
+    codeblock: () => {
+      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+      block("```\n" + (sel || "код") + "\n```", 4, (sel || "код").length);
+    },
+    link: () => {
+      const s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s, e) || "текст ссылки";
+      const text = `[${sel}](https://)`;
+      replaceRange(s, e, text, s + sel.length + 3, s + text.length - 1);
+    },
+    unlink: () => {
+      let s = ta.selectionStart, e = ta.selectionEnd;
+      if (s === e) { [s, e] = lineRange(); }
+      const part = ta.value.slice(s, e), out = part.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1");
+      if (out === part) { toast("В выделении нет ссылок", "info"); return; }
+      replaceRange(s, e, out);
+    },
+    image: () => {},
+  };
+  [1, 2, 3, 4, 5, 6].forEach(n => MD["h" + n] = () => heading(n));
+  // картинка: файл с компьютера или из буфера, кладется рядом с md, путь подставляется сам
+  const imgExt = tp => ({"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/svg+xml": ".svg", "image/webp": ".webp", "image/bmp": ".bmp"}[tp] || ".png");
+  let imgEl = null;
+  const closeImg = () => { if (imgEl) { imgEl.remove(); imgEl = null; } };
+  const openImagePanel = (blob, fname) => {
+    closeMenu(); closeImg();
+    const mdDir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    imgEl = document.createElement("div");
+    imgEl.className = "pmenu"; imgEl.style.width = "400px"; imgEl.tabIndex = -1;
+    imgEl.innerHTML = `<div class="pg">Картинка</div>
+      <div class="imgdrop" id="imDrop">${ic("image")}<div>Перетащи картинку сюда или нажми Ctrl+V</div>
+        <div class="row" style="justify-content:center"><button id="imPick">Выбрать на компьютере</button><button id="imClip">Из буфера обмена</button></div>
+        <input type="file" id="imFile" accept="image/*" class="hidden"></div>
+      <img id="imPrev" class="hidden" alt="">
+      <div style="padding:2px 10px"><label class="fl">Имя файла</label><input type="text" id="imName" placeholder="schema.png"></div>
+      <div style="padding:2px 10px"><label class="fl">Подпись (alt)</label><input type="text" id="imAlt" placeholder="что на картинке"></div>
+      <div class="small muted" style="padding:6px 10px 0" id="imWhere"></div>
+      <label class="check" style="padding:0 10px"><input type="checkbox" id="imOver"> Заменить, если файл с таким именем уже есть</label>
+      <div class="row" style="padding:8px 10px;justify-content:flex-end"><button id="imCancel">Отмена</button><button class="primary" id="imOk" disabled>Вставить</button></div>`;
+    document.body.appendChild(imgEl);
+    const b0 = document.querySelector('[data-md="image"]').getBoundingClientRect();
+    imgEl.style.left = Math.max(8, Math.min(b0.left, innerWidth - 416)) + "px";
+    imgEl.style.top = Math.max(8, Math.min(b0.bottom + 6, innerHeight - imgEl.offsetHeight - 8)) + "px";
+    let cur = null;
+    const where = () => { $("#imWhere").textContent = "Ляжет рядом со страницей: " + S.docs_dir + "/" + (mdDir ? mdDir + "/" : "") + ($("#imName").value.trim() || "..."); };
+    const take = (b, name) => {
+      if (!b || !/^image\//.test(b.type)) { toast("Это не картинка", "err"); return; }
+      cur = b;
+      const d0 = new Date(), z = n => String(n).padStart(2, "0");
+      const stamp = d0.getFullYear() + z(d0.getMonth() + 1) + z(d0.getDate()) + "-" + z(d0.getHours()) + z(d0.getMinutes());
+      const base = name ? name.replace(/\.[^.]+$/, "") : "image-" + stamp;
+      $("#imName").value = slug(base) + imgExt(b.type);
+      if (!$("#imAlt").value.trim()) $("#imAlt").value = name ? base : "";
+      $("#imPrev").src = URL.createObjectURL(b); $("#imPrev").classList.remove("hidden");
+      $("#imOk").disabled = false; where();
+      imgEl.style.top = Math.max(8, Math.min(parseFloat(imgEl.style.top), innerHeight - imgEl.offsetHeight - 8)) + "px";
+    };
+    $("#imPick").onclick = () => $("#imFile").click();
+    $("#imFile").onchange = e => { const f = e.target.files[0]; if (f) take(f, f.name); };
+    $("#imClip").onclick = async () => {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const it of items) {
+          const tp = it.types.find(x => x.startsWith("image/"));
+          if (tp) return take(await it.getType(tp), null);
+        }
+        toast("В буфере обмена нет картинки", "info");
+      } catch (e) { toast("Браузер не дал прочитать буфер. Нажми Ctrl+V прямо в этом окне", "info"); }
+    };
+    imgEl.addEventListener("paste", e => {
+      const it = [...(e.clipboardData?.items || [])].find(x => x.type.startsWith("image/"));
+      if (it) { e.preventDefault(); take(it.getAsFile(), null); }
+    });
+    const dz = $("#imDrop");
+    ["dragover", "dragenter"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); dz.classList.add("over"); }));
+    dz.addEventListener("dragleave", () => dz.classList.remove("over"));
+    dz.addEventListener("drop", e => { e.preventDefault(); e.stopPropagation(); dz.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) take(f, f.name); });
+    $("#imName").oninput = where;
+    $("#imCancel").onclick = () => { closeImg(); ta.focus(); };
+    $("#imOk").onclick = async () => {
+      const name = $("#imName").value.trim(), alt = $("#imAlt").value.trim();
+      if (!cur || !name) return;
+      const data = await new Promise(res => { const fr2 = new FileReader(); fr2.onload = () => res(String(fr2.result).split(",")[1]); fr2.readAsDataURL(cur); });
+      try {
+        const r = await api("/api/asset", {repo: S.repo, md: path, name, data, overwrite: $("#imOver").checked});
+        closeImg();
+        insert(`![${alt}](${r.path})`);
+        toastUndo(r.message);
+        ftCache = {};
+      } catch (e) { toast(e.message, "err"); }
+    };
+    where();
+    if (blob) take(blob, fname);
+    setTimeout(() => imgEl && imgEl.focus(), 30);
+  };
+  MD.image = () => imgEl ? closeImg() : openImagePanel();
+  // Ctrl+V картинки прямо в текст тоже открывает это окно
+  ta.addEventListener("paste", e => {
+    if (!isMd) return;
+    const it = [...(e.clipboardData?.items || [])].find(x => x.type.startsWith("image/"));
+    if (it) { e.preventDefault(); openImagePanel(it.getAsFile(), null); }
+  });
+  const presetCtx = () => {
+    const stem = info.name.replace(/\.[^.]+$/, "");
+    const les = (info.name.match(/LES-\d+/i) || path.match(/LES-\d+/i) || ["LES-XXXXX"])[0].toUpperCase();
+    const h1 = (ta.value.match(/^#\s+(.+)$/m) || [])[1];
+    const d = new Date(), z = n => String(n).padStart(2, "0");
+    return {les, name: stem.toLowerCase(), title: (h1 || (info.menu[0] && info.menu[0].title) || stem).trim(),
+            date: z(d.getDate()) + "." + z(d.getMonth() + 1) + "." + d.getFullYear()};
+  };
+  const applyPreset = pr => {
+    closeMenu();
+    const text = typeof pr.t === "function" ? pr.t(presetCtx()) : fillTpl(pr.text, presetCtx());
+    const v = ta.value.trim();
+    if (pr.page && (v === "" || /^#\s+[^\n]*$/.test(v))) {
+      ta.focus(); ta.setSelectionRange(0, ta.value.length); insert(text); ta.setSelectionRange(0, 0); ta.scrollTop = 0;
+      toast("Шаблон «" + pr.n + "» подставлен", "ok", 2000);
+    } else if (pr.inline) insert(text);
+    else { toLineEnd(); block(text.replace(/\n+$/, "")); }
+  };
+  // блок не должен разрывать строку: если выделены не целые строки, ставим курсор в конец текущей строки
+  const toLineEnd = () => {
+    const v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+    const wholeLines = s !== e && (s === 0 || v[s - 1] === "\n") && (e === v.length || v[e] === "\n" || v[e - 1] === "\n");
+    if (wholeLines) return;
+    let end = v.indexOf("\n", e); if (end < 0) end = v.length;
+    ta.setSelectionRange(end, end);
+  };
+  let menuEl = null;
+  const closeMenu = () => { if (menuEl) { menuEl.remove(); menuEl = null; } };
+  const menuPos = () => {
+    const btn = document.querySelector('[data-md="presets"]'), r = btn.getBoundingClientRect();
+    menuEl.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 420)) + "px"; menuEl.style.top = (r.bottom + 6) + "px";
+  };
+  const groupsOf = () => [...new Set(userPresets.map(u => u.group || "Мои шаблоны"))];
+  // форма внутри меню: размер таблицы или шаблон (новый / правка)
+  const showForm = (kind, idx) => {
+    if (kind === "table") {
+      menuEl.innerHTML = `<div class="pg">Таблица своего размера</div>
+        <div style="padding:6px 10px" class="row"><label class="small">Колонок <input type="number" id="ptC" min="1" max="20" value="3" style="width:64px"></label>
+        <label class="small">Строк <input type="number" id="ptR" min="1" max="100" value="3" style="width:64px"></label></div>
+        <div class="row" style="padding:6px 10px;justify-content:flex-end"><button data-fback="1">Назад</button><button class="primary" data-fok="table">Вставить</button></div>`;
+      setTimeout(() => $("#ptC").focus(), 30);
+      return;
+    }
+    const u = idx !== undefined ? userPresets[idx] : null;
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+    menuEl.innerHTML = `<div class="pg">${u ? "Изменить шаблон" : "Новый шаблон"}</div>
+      <div style="padding:4px 10px"><input type="text" id="ppName" placeholder="Название шаблона" value="${esc(u ? u.name : "")}"></div>
+      <div style="padding:4px 10px"><input type="text" id="ppGroup" list="ppGroups" placeholder="Группа в меню" value="${esc(u ? u.group || "" : "Мои шаблоны")}">
+        <datalist id="ppGroups">${groupsOf().map(g => `<option value="${esc(g)}">`).join("")}</datalist></div>
+      <div style="padding:4px 10px"><textarea id="ppText" spellcheck="false" style="width:100%;height:220px;font:12px/1.5 Consolas,monospace;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--code);color:var(--text);resize:vertical" placeholder="Текст шаблона в Markdown">${esc(u ? u.text : sel)}</textarea></div>
+      <label class="check" style="padding:0 10px"><input type="checkbox" id="ppPage" ${u && u.page ? "checked" : ""}> Страница целиком: в пустом файле заменяет все</label>
+      <div class="small muted" style="padding:4px 10px">Метки подставятся сами: {{LES}} номер задачи из имени файла, {{TITLE}} заголовок, {{NAME}} имя файла, {{DATE}} сегодня.</div>
+      <div class="row" style="padding:8px 10px;justify-content:flex-end"><button data-fback="1">Назад</button><button class="primary" data-fok="preset" data-old="${u ? esc(u.name) : ""}">Сохранить</button></div>`;
+    setTimeout(() => $("#ppName").focus(), 30);
+  };
+  const renderList = () => {
+    const builtIn = PRESETS.map((pr, i) => `<div class="pi" data-pi="${i}"><div><div>${esc(pr.n)}</div><div class="d">${esc(pr.d)}</div></div></div>`).join("");
+    const groups = {};
+    userPresets.forEach((u, i) => (groups[u.group || "Мои шаблоны"] = groups[u.group || "Мои шаблоны"] || []).push(
+      `<div class="pi" data-pu="${i}"><div><div>${esc(u.name)}</div>${u.desc ? `<div class="d">${esc(u.desc)}</div>` : ""}</div>
+        <button class="x" style="margin-left:auto" data-pedit="${i}" title="Изменить">${ic("edit")}</button>
+        <button class="x" style="margin-left:0" data-pdel="${i}" title="Удалить">${ic("x")}</button></div>`));
+    menuEl.innerHTML = Object.entries(groups).map(([g, items]) => `<div class="pg">${esc(g)}</div>${items.join("")}`).join("") +
+      (userPresets.length ? "" : `<div class="pg">Шаблоны</div><div class="pi" style="cursor:default"><div class="d">Шаблонов пока нет. Загрузи файл шаблонов от коллеги или создай свой.</div></div>`) +
+      `<div class="pg">Таблица</div>${builtIn}
+      <div class="pg">Шаблоны</div>
+      <div class="pi" data-pnew="1" style="color:var(--accent)">${ic("plus")}<div>Новый шаблон<div class="d">из выделенного текста или с нуля</div></div></div>
+      <div class="pi" data-pimport="1" style="color:var(--accent)">${ic("upload")}<div>Загрузить шаблоны из файла<div class="d">файл navtool-templates.json от коллеги</div></div></div>
+      ${userPresets.length ? `<div class="pi" data-pexport="1" style="color:var(--accent)">${ic("download")}<div>Сохранить шаблоны в файл<div class="d">чтобы передать коллегам (${userPresets.length})</div></div></div>` : ""}
+      <input type="file" id="ppFile" accept=".json,application/json" class="hidden">`;
+  };
+  const exportTemplates = () => {
+    const data = {format: TPL_FORMAT, version: 1,
+      templates: userPresets.map(u => ({group: u.group || "Мои шаблоны", name: u.name, desc: u.desc || "", page: !!u.page, text: u.text}))};
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+    a.download = "navtool-templates.json";
+    document.body.appendChild(a); a.click(); a.remove();
+    toast("Файл navtool-templates.json сохранен в «Загрузки». Его можно переслать коллегам", "ok", 6000);
+  };
+  const importTemplates = async file => {
+    let data;
+    try { data = JSON.parse(await file.text()); } catch (e) { toast("Это не файл шаблонов (не JSON)", "err"); return; }
+    const list = Array.isArray(data) ? data : data && data.templates;
+    if (!Array.isArray(list) || !list.length) { toast("В файле нет шаблонов", "err"); return; }
+    try {
+      const r = await api("/api/presets", {op: "import", templates: list});
+      userPresets = r.presets; toast(r.message); renderList();
+    } catch (e) { toast(e.message, "err"); }
+  };
+  MD.presets = async () => {
+    if (menuEl) return closeMenu();
+    if (userPresets === null) await loadUserPresets();
+    menuEl = document.createElement("div");
+    menuEl.className = "pmenu";
+    menuEl.style.width = "400px";
+    document.body.appendChild(menuEl);
+    renderList(); menuPos();
+    menuEl.addEventListener("mousedown", e => { if (!e.target.closest("input, textarea")) e.preventDefault(); });
+    menuEl.addEventListener("change", e => { if (e.target.id === "ppFile" && e.target.files[0]) importTemplates(e.target.files[0]); });
+    menuEl.addEventListener("click", async e => {
+      if (e.target.closest("[data-fback]")) return renderList();
+      const ok = e.target.closest("[data-fok]");
+      if (ok && ok.dataset.fok === "table") {
+        const c = Math.min(20, Math.max(1, +$("#ptC").value || 3)), r = Math.min(100, Math.max(1, +$("#ptR").value || 3));
+        closeMenu(); toLineEnd(); block(mdTable(c, r).replace(/\n+$/, ""), 2, 9); return;
+      }
+      if (ok && ok.dataset.fok === "preset") {
+        const name = $("#ppName").value.trim(), text = $("#ppText").value;
+        if (!name) { toast("Напиши название шаблона", "err"); return; }
+        const old = ok.dataset.old ? userPresets.find(u => u.name === ok.dataset.old) : null;
+        try {
+          if (old && old.name !== name) await api("/api/presets", {op: "del", name: old.name});
+          userPresets = (await api("/api/presets", {op: "add", name, text, group: $("#ppGroup").value.trim(),
+            desc: old ? old.desc || "" : "", page: $("#ppPage").checked})).presets;
+          toast("Шаблон сохранен"); renderList();
+        } catch (x) { toast(x.message, "err"); }
+        return;
+      }
+      const del = e.target.closest("[data-pdel]");
+      if (del) {
+        const u = userPresets[+del.dataset.pdel];
+        if (!confirm("Удалить шаблон «" + u.name + "»?")) return;
+        userPresets = (await api("/api/presets", {op: "del", name: u.name})).presets; renderList(); return;
+      }
+      const ed = e.target.closest("[data-pedit]"); if (ed) return showForm("preset", +ed.dataset.pedit);
+      if (e.target.closest("[data-pnew]")) return showForm("preset");
+      if (e.target.closest("[data-pimport]")) return $("#ppFile").click();
+      if (e.target.closest("[data-pexport]")) return exportTemplates();
+      const pi = e.target.closest("[data-pi]");
+      if (pi) { const pr = PRESETS[+pi.dataset.pi]; return pr.form ? showForm(pr.form) : applyPreset(pr); }
+      const pu = e.target.closest("[data-pu]");
+      if (pu) { const u = userPresets[+pu.dataset.pu]; return applyPreset({n: u.name, text: u.text, page: !!u.page}); }
+    });
+    setTimeout(() => document.addEventListener("mousedown", function off(ev) {
+      if (menuEl && !menuEl.contains(ev.target) && !ev.target.closest('[data-md="presets"]')) closeMenu();
+      if (!menuEl) document.removeEventListener("mousedown", off);
+    }), 0);
+  };
+  const _guard = modalGuard;
+  modalGuard = () => { const ok = _guard(); if (ok) closeMenu(); return ok; };
+  $("#edBar").addEventListener("mousedown", e => { if (e.target.closest("[data-md]")) e.preventDefault(); });
+  $("#edBar").addEventListener("click", e => { const b = e.target.closest("[data-md]"); if (b && MD[b.dataset.md]) MD[b.dataset.md](); });
+  $("#edZi").onclick = () => { zoom += 0.1; applyZoom(); };
+  $("#edZo").onclick = () => { zoom -= 0.1; applyZoom(); };
+  $("#edZv").onclick = () => { zoom = 1; applyZoom(); };
+  document.querySelector(".ed").addEventListener("wheel", onWheel, {passive: false});
+  ta.addEventListener("input", () => { lines(); mark(); pv(); });
+  ta.addEventListener("scroll", () => { gut.scrollTop = ta.scrollTop; onTaScroll(); });
+  ta.addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === "s") { e.preventDefault(); save(); return; }
+    if (isMd && e.ctrlKey && !e.shiftKey && (k === "b" || k === "и")) { e.preventDefault(); MD.bold(); return; }
+    if (isMd && e.ctrlKey && !e.shiftKey && (k === "i" || k === "ш")) { e.preventDefault(); MD.italic(); return; }
+    if (isMd && e.ctrlKey && !e.shiftKey && (k === "k" || k === "л")) { e.preventDefault(); MD.link(); return; }
+    if (e.ctrlKey && (k === "=" || k === "+")) { e.preventDefault(); zoom += 0.1; applyZoom(); return; }
+    if (e.ctrlKey && k === "-") { e.preventDefault(); zoom -= 0.1; applyZoom(); return; }
+    if (e.ctrlKey && k === "0") { e.preventDefault(); zoom = 1; applyZoom(); return; }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      insert(isMd ? "    " : "  ");
+    }
+  });
+  lines(); applyZoom(); pv();
+  setTimeout(() => {
+    ta.focus();
+    if (gotoLine) {
+      const arr = ta.value.split("\n");
+      const start = arr.slice(0, gotoLine - 1).reduce((a, l) => a + l.length + 1, 0);
+      ta.setSelectionRange(start, start + (arr[gotoLine - 1] || "").length);
+      ta.scrollTop = Math.max(0, (gotoLine - 6) * parseFloat(getComputedStyle(ta).lineHeight));
+    } else ta.setSelectionRange(0, 0);
+  }, 50);
+}
+
+/* ================= выбор папки в docs (с созданием новой) ================= */
+function withFolderPicker(input) {
+  if (!input || input.dataset.fp) return;
+  input.dataset.fp = "1";
+  const wrap = document.createElement("div");
+  wrap.className = "fprow";
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  const b = document.createElement("button");
+  b.type = "button"; b.title = "Выбрать папку или создать новую"; b.innerHTML = ic("folder") + "Выбрать";
+  wrap.appendChild(b);
+  b.onclick = () => openFolderPicker(input, b);
+}
+let fpEl = null;
+function closeFolderPicker() { if (fpEl) { fpEl.remove(); fpEl = null; } }
+async function openFolderPicker(input, anchor) {
+  if (fpEl) return closeFolderPicker();
+  const open = new Set([""]), cache = {};
+  let sel = input.value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""), adding = null;
+  sel.split("/").reduce((acc, part) => { const p = acc ? acc + "/" + part : part; if (part) open.add(acc); return p; }, "");
+  const dirsOf = async rel => cache[rel] || (cache[rel] = (await api("/api/ls?repo=" + encodeURIComponent(S.repo) + "&path=" + encodeURIComponent(rel))).entries.filter(e => e.dir));
+  fpEl = document.createElement("div");
+  fpEl.className = "pmenu"; fpEl.style.width = "420px";
+  document.body.appendChild(fpEl);
+  const r = anchor.getBoundingClientRect();
+  fpEl.style.left = Math.max(8, Math.min(r.right - 420, innerWidth - 436)) + "px";
+  fpEl.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - 380)) + "px";
+  const draw = async () => {
+    for (const d of [...open]) { try { await dirsOf(d); } catch (e) { open.delete(d); } }
+    const rows = [];
+    const row = (rel, name, d, hasKids) => rows.push(`<div class="fpi ${rel === sel ? "sel" : ""}" data-r="${esc(rel)}" style="--d:${d}">
+      <span class="tw" data-tg="1">${hasKids ? (open.has(rel) ? "▾" : "▸") : ""}</span>${ic("folder")}<span>${esc(name)}</span>
+      <button class="add" data-add="${esc(rel)}" title="Новая папка внутри">${ic("folderPlus")}</button></div>
+      ${adding === rel ? `<div class="fpi" style="--d:${d + 1};cursor:default"><input type="text" id="fpNew" placeholder="имя новой папки" style="padding:4px 8px"><button class="primary" id="fpMk">Создать</button></div>` : ""}`);
+    const walk = (rel, d) => (cache[rel] || []).forEach(e => { row(e.path, e.name, d, e.count > 0); if (open.has(e.path)) walk(e.path, d + 1); });
+    row("", S.docs_dir + "/", 0, true);
+    walk("", 1);
+    fpEl.innerHTML = `<div class="pg">Папка внутри ${esc(S.docs_dir)}/</div><div style="max-height:320px;overflow:auto">${rows.join("")}</div>
+      <div class="row" style="padding:8px 10px;justify-content:flex-end"><button id="fpCancel">Отмена</button><button class="primary" id="fpOk">Выбрать${sel ? ": " + esc(sel) : " корень"}</button></div>`;
+    if ($("#fpNew")) { $("#fpNew").focus(); $("#fpNew").onkeydown = e => { if (e.key === "Enter") $("#fpMk").click(); if (e.key === "Escape") { adding = null; draw(); } }; }
+  };
+  fpEl.addEventListener("click", async e => {
+    if (e.target.closest("#fpCancel")) return closeFolderPicker();
+    if (e.target.closest("#fpOk")) { input.value = sel; input.dispatchEvent(new Event("input")); return closeFolderPicker(); }
+    if (e.target.closest("#fpMk")) {
+      const name = $("#fpNew").value.trim();
+      if (!name) return;
+      try {
+        const res = await api("/api/mkdir", {repo: S.repo, dir: adding, name: slug(name)});
+        delete cache[adding]; open.add(adding); sel = res.path; adding = null; ftCache = {};
+        toast(res.message, "ok", 2500);
+      } catch (x) { toast(x.message, "err"); }
+      return draw();
+    }
+    const add = e.target.closest("[data-add]");
+    if (add) { adding = add.dataset.add; open.add(adding); return draw(); }
+    const rw = e.target.closest("[data-r]");
+    if (rw) {
+      const rel = rw.dataset.r;
+      if (e.target.closest("[data-tg]") && rel) { open.has(rel) ? open.delete(rel) : open.add(rel); return draw(); }
+      sel = rel; open.add(rel); return draw();
+    }
+  });
+  fpEl.addEventListener("dblclick", e => { const rw = e.target.closest("[data-r]"); if (rw) { sel = rw.dataset.r; fpEl.querySelector("#fpOk").click(); } });
+  await draw();
+}
+
+/* ================= новая страница в меню ================= */
+function newPage(pk) {
+  const isV = !!vOf(pk), ch = isV ? vChain(pk) : {id: byKey[pk], key: pk, titles: []};
+  const pid = ch.id;
+  const base = hintK(pk).replace(/\/+$/, "");
+  modal("Новая страница", `
+    <div class="small muted">В разделе меню: <b>${esc(crumbK(pk))}</b></div>
+    <label class="fl">Название в меню</label><input type="text" id="npTitle" placeholder="Например: LES-13800 Новая история">
+    <label class="fl">Имя файла</label><input type="text" id="npName" placeholder="les-13800.md">
+    <label class="fl">Папка внутри ${esc(S.docs_dir)}/</label><input type="text" id="npDir" list="dirList" value="${esc(base)}">
+    <div class="small muted" style="margin-top:8px">Создастся md-файл с заголовком, строка добавится в ${esc(S.yml)}, и файл откроется в редакторе.</div>`,
+    [{text: "Отмена"}, {text: ic("filePlus") + "Создать", cls: "primary", onClick: async () => {
+      const title = $("#npTitle").value.trim();
+      let name = $("#npName").value.trim();
+      if (!title) { toast("Напиши название", "err"); return true; }
+      if (!name) name = slug(title) + ".md";
+      if (!/\.(md|markdown)$/i.test(name)) name += ".md";
+      const dir = $("#npDir").value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+      try {
+        const r = await api("/api/newfile", {repo: S.repo, sha: S.sha, dir, name, title, nav: isV ? {id: pid, sub: ch.titles} : pid, mode: "end"});
+        toastUndo(r.message);
+        openK.add(ch.key);
+        closeModal(true);
+        await load(null);
+        renderTree(S.nodes.filter(n => n.path === r.path).map(n => K[n.id]));
+        ftCache = {};
+        openEditor(r.path);
+      } catch (e) { toast(e.message, "err"); return true; }
+    }}]);
+  let nameTouched = false;
+  $("#npName").oninput = () => { nameTouched = true; };
+  $("#npTitle").oninput = () => { if (!nameTouched) $("#npName").value = $("#npTitle").value.trim() ? slug($("#npTitle").value) + ".md" : ""; };
+  withFolderPicker($("#npDir"));
+  setTimeout(() => $("#npTitle").focus(), 50);
+}
+
+/* ================= дерево файлов docs/ ================= */
+let ftCache = {}, ftOpen = new Set([""]), leftTab = "nav";
+function fmtSize(n) { return n < 1024 ? n + " Б" : n < 1048576 ? Math.round(n / 1024) + " КБ" : (n / 1048576).toFixed(1) + " МБ"; }
+async function ftFetch(rel) {
+  if (ftCache[rel]) return ftCache[rel];
+  ftCache[rel] = (await api("/api/ls?repo=" + encodeURIComponent(S.repo) + "&path=" + encodeURIComponent(rel))).entries;
+  return ftCache[rel];
+}
+async function renderFiles2(flash) {
+  if (!S || leftTab !== "files") return;
+  try { for (const d of [...ftOpen]) await ftFetch(d).catch(() => ftOpen.delete(d)); } catch (e) {}
+  const out = [`<div class="tr fdir sec" data-fp="" data-dir="1" style="--d:0">
+    <span class="tw"></span>${ic("folder", "ti")}<span class="ttl">${esc(S.docs_dir)}/</span>
+    <span class="acts"><button data-fa="newfile" title="Новый файл">${ic("filePlus")}</button><button data-fa="newdir" title="Новая папка">${ic("folderPlus")}</button></span></div>`];
+  const walk = (rel, d) => (ftCache[rel] || []).forEach(e => {
+    if (e.dir) {
+      const open = ftOpen.has(e.path);
+      out.push(`<div class="tr fdir sec ${flash === e.path ? "flash" : ""}" data-fp="${esc(e.path)}" data-dir="1" draggable="true" style="--d:${d}">
+        <button class="tw ${open ? "open" : ""}" data-fa="toggle">${ic("chev")}</button>${ic("folder", "ti")}
+        <span class="ttl">${esc(e.name)}</span><span class="cnt">${e.count || ""}</span>
+        <span class="acts"><button data-fa="newfile" title="Новый файл в этой папке">${ic("filePlus")}</button>
+          <button data-fa="newdir" title="Новая папка внутри">${ic("folderPlus")}</button>
+          <button data-fa="rm" class="del" title="Удалить папку">${ic("trash")}</button></span></div>`);
+      if (open) walk(e.path, d + 1);
+    } else {
+      const img = /\.(png|jpe?g|gif|svg|webp|bmp|ico)$/i.test(e.name);
+      out.push(`<div class="tr ffile ${e.text ? "txt" : "bin"} ${flash === e.path ? "flash" : ""}" data-fp="${esc(e.path)}" draggable="true" style="--d:${d}">
+        <span class="tw"></span>${ic(img ? "image" : e.text ? "file" : "file", "ti")}
+        <span class="ttl" title="${esc(e.path)}">${esc(e.name)}</span><span class="fsz">${fmtSize(e.size)}</span>
+        ${e.md ? `<span class="pill ${e.in_nav ? "ok" : "warn"}" style="margin-left:6px">${e.in_nav ? "в меню" : "нет в меню"}</span>` : ""}
+        <span class="acts">
+          ${e.text ? `<button data-fa="edit" title="Открыть в редакторе">${ic("code")}</button>` : ""}
+          ${e.md && !e.in_nav ? `<button data-fa="tonav" title="Добавить в меню">${ic("plus")}</button>` : ""}
+          <button data-fa="rm" class="del" title="Удалить файл">${ic("trash")}</button></span></div>`);
+    }
+  });
+  walk("", 1);
+  $("#ftree").innerHTML = out.join("");
+  const f = $("#ftree .flash"); if (f) f.scrollIntoView({block: "center", behavior: "smooth"});
+}
+function setLeftTab(tab) {
+  leftTab = tab; prefSet("navtool.lefttab", tab);
+  document.querySelectorAll(".ptabs [data-pt]").forEach(b => b.classList.toggle("on", b.dataset.pt === tab));
+  $("#navPane").style.display = tab === "nav" ? "flex" : "none";
+  $("#filesPane").classList.toggle("hidden", tab !== "files");
+  $("#leftTitle").textContent = tab === "nav" ? "Меню сайта" : "Файлы";
+  if (tab === "files") renderFiles2();
+}
+document.querySelector(".ptabs").addEventListener("click", e => { const b = e.target.closest("[data-pt]"); if (b) setLeftTab(b.dataset.pt); });
+function askName(title, label, def, hint, cb) {
+  modal(title, `<label class="fl">${esc(label)}</label><input type="text" id="anName" value="${esc(def)}">
+    ${hint ? `<div class="small muted" style="margin-top:8px">${hint}</div>` : ""}`,
+    [{text: "Отмена"}, {text: ic("check") + "Создать", cls: "primary", onClick: () => cb($("#anName").value.trim())}]);
+  setTimeout(() => { const i = $("#anName"); i.focus(); const dot = i.value.lastIndexOf("."); i.setSelectionRange(0, dot > 0 ? dot : i.value.length); }, 50);
+  $("#anName").onkeydown = e => { if (e.key === "Enter") document.querySelectorAll("#mFoot button")[1].click(); };
+}
+function ftNewFile(dir) {
+  askName("Новый файл", "Имя файла с расширением", "new-page.md",
+    `Папка: <b>${esc(S.docs_dir + (dir ? "/" + dir : ""))}</b>. Для .md сразу будет заголовок. В меню md добавляется отдельно (кнопка + у файла).`,
+    async name => {
+      if (!name) { toast("Напиши имя", "err"); return true; }
+      try {
+        const r = await api("/api/newfile", {repo: S.repo, dir, name});
+        toastUndo(r.message); closeModal(true);
+        ftCache = {}; ftOpen.add(dir); await renderFiles2(r.path); load();
+        if (!/\.(png|jpe?g|gif|pdf|docx|xlsx|zip)$/i.test(name)) openEditor(r.path);
+      } catch (e) { toast(e.message, "err"); return true; }
+    });
+}
+function ftNewDir(dir) {
+  askName("Новая папка", "Имя папки", "new-folder", `Внутри: <b>${esc(S.docs_dir + (dir ? "/" + dir : ""))}</b>`, async name => {
+    if (!name) { toast("Напиши имя", "err"); return true; }
+    try {
+      const r = await api("/api/mkdir", {repo: S.repo, dir, name});
+      toast(r.message); closeModal(true);
+      ftCache = {}; ftOpen.add(dir); ftOpen.add(r.path); await renderFiles2(r.path);
+    } catch (e) { toast(e.message, "err"); return true; }
+  });
+}
+$("#ftree").addEventListener("click", async e => {
+  const row = e.target.closest(".tr"); if (!row) return;
+  const rel = row.dataset.fp, isDir = !!row.dataset.dir;
+  const a = e.target.closest("[data-fa]"), act = a ? a.dataset.fa : (isDir ? "toggle" : "edit");
+  if (act === "toggle") { if (rel === "") return; ftOpen.has(rel) ? ftOpen.delete(rel) : ftOpen.add(rel); return renderFiles2(); }
+  if (act === "newfile") return ftNewFile(rel);
+  if (act === "newdir") return ftNewDir(rel);
+  if (act === "edit") {
+    if (row.classList.contains("bin")) { toast("Это не текстовый файл, в редакторе он не откроется", "info"); return; }
+    return openEditor(rel);
+  }
+  if (act === "tonav") { useRepoFile(rel); toast("Отметь разделы в меню и нажми «Проверить и добавить»", "info"); setLeftTab("nav"); return; }
+  if (act === "rm") return deleteDocPath(rel);
+});
+/* удаление файла или папки из docs: с учетом git и меню */
+async function deleteDocPath(rel) {
+  let info;
+  try { info = await api("/api/rmfile", {repo: S.repo, path: rel, dry: true}); } catch (e) { toast(e.message, "err"); return; }
+  modal(info.is_dir ? "Удалить папку?" : "Удалить файл?", `<div><b>${esc(S.docs_dir + "/" + rel)}</b></div>
+    <div class="note ${info.tracked ? "warn" : "info"}">${ic(info.tracked ? "warn" : "info")}<span>${info.tracked
+      ? (info.is_dir ? "Папка есть в git: в коммите ее файлы удалятся и из репозитория." : "Файл есть в git: в коммите он удалится и из репозитория.")
+      : (info.is_dir ? "Этой папки нет в git, она просто исчезнет." : "Файла нет в git (он новый), он просто исчезнет.")}</span></div>
+    ${info.nav.length ? `<label class="check"><input type="checkbox" id="rmNav" checked><span>Убрать из меню (${info.nav.length}), чтобы не осталось битой ссылки:<br>
+      <span class="muted small">${info.nav.slice(0, 6).map(esc).join("<br>")}${info.nav.length > 6 ? "<br>..." : ""}</span></span></label>` : ""}
+    <div class="note info">${ic("info")}<span>Копия уйдет в корзину программы, вернуть можно кнопкой «Отменить» в сообщении внизу или вверху справа.</span></div>`,
+    [{text: "Оставить"}, {text: ic("trash") + "Удалить", cls: "danger", onClick: async () => {
+      const nav = $("#rmNav") ? $("#rmNav").checked : false;
+      try { toastUndo((await api("/api/rmfile", {repo: S.repo, path: rel, nav})).message); } catch (x) { toast(x.message, "err"); }
+      ftCache = {}; await load(); if (leftTab === "files") renderFiles2();
+    }}]);
+}
+
+/* перенос перетаскиванием: файл или папку бросаешь на папку (или на файл в ней) */
+let dragRel = null, dragHover = null;
+const parentOf = rel => rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+const canDrop = (src, dir) => src !== null && dir !== null && dir !== parentOf(src) && dir !== src && !dir.startsWith(src + "/");
+const dropDirOf = row => !row ? null : row.dataset.dir ? row.dataset.fp : parentOf(row.dataset.fp);
+const dragCleanup = () => {
+  document.querySelectorAll("#ftree .dragging, #ftree .dropok").forEach(x => x.classList.remove("dragging", "dropok"));
+  if (dragHover) clearTimeout(dragHover.t);
+  dragHover = null;
+};
+$("#ftree").addEventListener("dragstart", e => {
+  const row = e.target.closest(".tr[data-fp]");
+  if (!row || !row.dataset.fp) return;
+  dragRel = row.dataset.fp;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragRel);
+  row.classList.add("dragging");
+});
+document.addEventListener("dragend", () => { dragRel = null; dragCleanup(); });
+$("#ftree").addEventListener("dragover", e => {
+  if (dragRel === null) return;
+  const row = e.target.closest(".tr"), dir = dropDirOf(row);
+  document.querySelectorAll("#ftree .dropok").forEach(x => x.classList.remove("dropok"));
+  if (!canDrop(dragRel, dir)) { e.dataTransfer.dropEffect = "none"; return; }
+  e.preventDefault(); e.stopPropagation();
+  e.dataTransfer.dropEffect = "move";
+  const target = document.querySelector(`#ftree .tr[data-dir][data-fp="${CSS.escape(dir)}"]`);
+  if (target) target.classList.add("dropok");
+  // свернутая папка раскрывается, если подержать над ней
+  if (row && row.dataset.dir && dir && !ftOpen.has(dir) && (!dragHover || dragHover.dir !== dir)) {
+    if (dragHover) clearTimeout(dragHover.t);
+    dragHover = {dir, t: setTimeout(() => { ftOpen.add(dir); renderFiles2(); }, 700)};
+  }
+});
+$("#ftree").addEventListener("drop", e => {
+  if (dragRel === null) return;
+  e.preventDefault(); e.stopPropagation();
+  const src = dragRel, dir = dropDirOf(e.target.closest(".tr"));
+  dragRel = null; dragCleanup();
+  if (canDrop(src, dir)) moveFile(src, dir);
+});
+async function moveFile(src, dir) {
+  let p;
+  try { p = await api("/api/move", {repo: S.repo, src, dst_dir: dir, dry: true}); } catch (e) { toast(e.message, "err"); return; }
+  const where = S.docs_dir + (dir ? "/" + dir : "") + "/";
+  modal(p.is_dir ? "Перенести папку?" : "Перенести файл?", `
+    <div><b>${esc(S.docs_dir + "/" + src)}</b></div><div class="muted small" style="margin:2px 0">в</div><div><b>${esc(where)}</b></div>
+    <div class="note info">${ic("info")}<span>${p.nav.length ? `Пути в меню обновятся: ${p.nav.length}` : "В меню этого нет, меню не меняется"}<br>
+      ${p.links ? `Ссылки поправятся: ${p.links} в файлах: ${p.files.length}` : "Ссылки править не нужно"}</span></div>
+    ${p.files.length ? `<div class="glist" style="margin-top:8px">${p.files.map(f => `<div class="gl"><span class="fp">${esc(f)}</span></div>`).join("")}</div>` : ""}
+    <div class="small muted" style="margin-top:8px">Откатить можно кнопкой «Отменить» в сообщении внизу или вверху справа.</div>`,
+    [{text: "Отмена"}, {text: ic("check") + "Перенести", cls: "primary", onClick: async () => {
+      try {
+        const r = await api("/api/move", {repo: S.repo, sha: S.sha, src, dst_dir: dir});
+        toastUndo(r.message);
+        ftCache = {}; ftOpen.add(dir);
+        await load();
+        renderFiles2(r.dst);
+      } catch (e) { toast(e.message, "err"); return true; }
+    }}]);
+}
+$("#fNewFile").innerHTML = ic("filePlus") + "Новый файл"; $("#fNewDir").innerHTML = ic("folderPlus") + "Новая папка";
+$("#fRefresh").innerHTML = ic("refresh");
+$("#fNewFile").onclick = () => ftNewFile("");
+$("#fNewDir").onclick = () => ftNewDir("");
+$("#fRefresh").onclick = () => { ftCache = {}; renderFiles2(); };
+
+/* ================= форма добавления ================= */
+$("#dropIco").innerHTML = ic("upload"); $("#fbIco").innerHTML = ic("file"); $("#fileClear").innerHTML = ic("x");
+function mdTitle(text, fallback) {
+  const t = text.replace(/^\ufeff/, "").replace(/\r\n/g, "\n");
+  const fm = t.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (fm) { const m = fm[1].match(/^title\s*:\s*(.+)$/m); if (m) return m[1].trim().replace(/^['"]|['"]$/g, ""); }
+  const h = t.match(/^#\s+(.+?)\s*#*\s*$/m);
+  return h ? h[1].trim() : fallback;
+}
+function takeFile(f) {
+  if (!f) return;
+  if (!/\.(md|markdown)$/i.test(f.name)) { toast("Нужен файл .md", "err"); return; }
+  const r = new FileReader();
+  r.onload = () => {
+    src = {kind: "upload", filename: f.name, content: r.result, size: f.size};
+    if (!titleTouched) $("#title").value = mdTitle(r.result, f.name.replace(/\.(md|markdown)$/i, ""));
+    if (!dirTouched) { const first = [...checkedK][0]; $("#dir").value = first ? hintK(first) : ""; }
+    renderForm(); renderTree();
+  };
+  r.readAsText(f, "utf-8");
+}
+function useRepoFile(path) {
+  const f = S.files.find(x => x.path === path);
+  src = {kind: "repo", path, title: f ? f.title : path};
+  if (!titleTouched) $("#title").value = src.title;
+  closeModal(); renderForm(); renderTree();
+  $("#addCard").scrollIntoView({behavior: "smooth", block: "start"});
+}
+$("#pickPc").onclick = () => $("#fileInput").click();
+$("#fileInput").onchange = e => { takeFile(e.target.files[0]); e.target.value = ""; };
+["dragover", "dragenter"].forEach(ev => document.addEventListener(ev, e => {
+  e.preventDefault();
+  if (!$("#app").classList.contains("hidden") && [...(e.dataTransfer?.types || [])].includes("Files")) $("#drop").classList.add("over");
+}));
+["dragleave", "drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev === "drop" || !e.relatedTarget) $("#drop").classList.remove("over"); }));
+document.addEventListener("drop", e => { if (!$("#app").classList.contains("hidden") && e.dataTransfer.files[0]) takeFile(e.dataTransfer.files[0]); });
+$("#fileClear").onclick = () => resetForm(true);
+$("#title").addEventListener("input", () => { titleTouched = !!$("#title").value; renderForm(); });
+$("#dir").addEventListener("input", () => { dirTouched = true; renderForm(); renderTree(); });
+withFolderPicker($("#dir"));
+$("#overwrite").addEventListener("change", renderForm);
+$("#modeSeg").addEventListener("click", e => {
+  const b = e.target.closest("[data-m]"); if (!b) return;
+  mode = b.dataset.m; document.querySelectorAll("#modeSeg button").forEach(x => x.classList.toggle("on", x === b));
+});
+$("#pickDocs").onclick = () => openDocsPicker();
+function openDocsPicker() {
+  modal("Файл из " + S.docs_dir + "/", `
+    <div class="row"><input type="text" id="dpQ" placeholder="Поиск по имени или заголовку" style="flex:1">
+    <label class="check" style="margin:0"><input type="checkbox" id="dpOrph"> только те, что не в меню</label></div>
+    <div class="flist" id="dpList"></div>`, [{text: "Отмена"}]);
+  const draw = () => {
+    const q = $("#dpQ").value.trim().toLowerCase(), only = $("#dpOrph").checked;
+    const list = S.files.filter(f => (!only || !f.in_nav.length) && (!q || (f.path + " " + f.title).toLowerCase().includes(q)));
+    $("#dpList").innerHTML = list.slice(0, 300).map(f => `<div class="fi" data-p="${esc(f.path)}">${ic("file", "ti")}
+      <div class="grow" style="min-width:0"><div class="ttl">${esc(f.title)}</div><div class="small muted ttl">${esc(f.path)}</div></div>
+      <span class="pill ${f.in_nav.length ? "ok" : "warn"}">${f.in_nav.length ? "в меню" : "нет в меню"}</span></div>`).join("")
+      || `<div class="empty">${ic("info")}Ничего не найдено</div>`;
+  };
+  $("#dpQ").oninput = draw; $("#dpOrph").onchange = draw;
+  $("#dpList").onclick = e => { const el = e.target.closest("[data-p]"); if (el) useRepoFile(el.dataset.p); };
+  draw(); setTimeout(() => $("#dpQ").focus(), 50);
+}
+function currentPath() {
+  if (!src) return null;
+  if (src.kind === "repo") return src.path;
+  const name = src.filename.replace(/\s+/g, "-");
+  const d = $("#dir").value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return d ? d + "/" + name : name;
+}
+function resetForm(keepTargets) {
+  src = null; titleTouched = false; dirTouched = false;
+  $("#title").value = ""; $("#dir").value = ""; $("#sub").value = ""; $("#overwrite").checked = false; $("#subDet").open = false;
+  if (!keepTargets) checkedK = new Set();
+  if (S) { renderForm(); renderTree(); }
+}
+function renderForm() {
+  if (!S) return;
+  $("#drop").classList.toggle("hidden", !!src); $("#fileBox").classList.toggle("hidden", !src);
+  const p = currentPath();
+  if (src) {
+    const up = src.kind === "upload";
+    $("#fbName").textContent = up ? src.filename : src.path.split("/").pop();
+    $("#fbSub").textContent = up ? `с компьютера, ${Math.max(1, Math.round(src.size / 1024))} КБ` + (/\s/.test(src.filename) ? ", пробелы в имени заменятся на -" : "")
+                                 : "уже лежит в репозитории";
+    $("#dirWrap").classList.toggle("hidden", !up); $("#owWrap").classList.toggle("hidden", !up);
+    $("#finalPath").textContent = p;
+    const exists = up && S.files.some(f => f.path === p);
+    const where = S.in_nav[p] || [];
+    $("#already").innerHTML =
+      (exists ? `<div class="note warn">${ic("warn")}<span>Файл с таким путем уже есть в репо. Если текст другой, включи «Перезаписать».</span></div>` : "") +
+      (where.length ? `<div class="note info">${ic("info")}<span>Эта страница уже в меню: ${where.map(esc).join("; ")}</span></div>` : "");
+  }
+  const ids = [...checkedK];
+  $("#chips").innerHTML = ids.length
+    ? `<div class="chips">${ids.map(k => `<span class="chip" title="${esc(crumbK(k))}"><span>${esc(crumbK(k))}${vOf(k) ? " (новый)" : ""}</span><button data-x="${esc(k)}">${ic("x")}</button></span>`).join("")}</div>`
+    : `<div class="hint">${ic("info")}Отметь галочками разделы в меню слева, можно несколько</div>`;
+  const title = $("#title").value.trim();
+  const why = !src ? "Выбери файл" : !title ? "Заполни название" : !ids.length ? "Отметь разделы слева" : "";
+  $("#why").textContent = why;
+  $("#previewBtn").disabled = !!why;
+  $("#st1").classList.toggle("done", !!src && !!title);
+  $("#st2").classList.toggle("done", ids.length > 0);
+  $("#st3").classList.toggle("done", !why);
+}
+$("#chips").addEventListener("click", e => { const x = e.target.closest("[data-x]"); if (x) toggleKey(x.dataset.x, false); });
+function payload() {
+  const b = {repo: S.repo, sha: S.sha, targets: [...checkedK].map(targetOf), title: $("#title").value,
+             mode, subsection: $("#subDet").open ? $("#sub").value : "", overwrite: $("#overwrite").checked};
+  if (src.kind === "upload") b.upload = {filename: src.filename, content: src.content, dir: $("#dir").value};
+  else b.path = src.path;
+  return b;
+}
+function diffHtml(d) {
+  if (!d) return "";
+  return `<pre class="diff">${d.split("\n").map(l => {
+    const c = l.startsWith("@@") ? "h" : l.startsWith("+") ? "a" : l.startsWith("-") ? "d" : "";
+    return `<div class="${c}">${esc(l) || " "}</div>`;
+  }).join("")}</pre>`;
+}
+$("#previewBtn").onclick = async () => {
+  let r;
+  try { r = await api("/api/preview", payload()); } catch (e) { toast(e.message, "err"); return; }
+  const fileNote = r.file_note ? `<div class="note ${r.file_note[0] === "warn" || r.file_note[0] === "overwrite" ? "warn" : "info"}">${ic(r.file_note[0] === "warn" ? "warn" : "file")}<span>${esc(r.file_note[1])}</span></div>` : "";
+  const notes = r.notes.map(([k, t]) => `<div class="note ${k === "add" ? "ok" : "warn"}">${ic(k === "add" ? "plus" : "info")}<span>${k === "add" ? "Добавится в " : ""}${esc(t)}</span></div>`).join("");
+  const can = r.count > 0 || r.writes_file;
+  modal("Проверь изменения", fileNote + notes + (r.diff ? `<div class="small muted" style="margin-top:12px">Изменения в ${esc(S.yml)}:</div>` + diffHtml(r.diff) : ""),
+    [{text: "Назад"}, {text: ic("check") + "Записать", cls: "primary", disabled: !can, onClick: apply}]);
+};
+async function apply() {
+  try {
+    const r = await api("/api/apply", payload());
+    lastAdded = {path: r.path, title: $("#title").value.trim()};
+    toastUndo(`Страница добавлена (${r.count} ${r.count === 1 ? "место" : "места"})` + (SV.state === "running" ? ". Локальный сайт пересоберется сам" : ""));
+    const keys = [...checkedK];
+    resetForm();
+    await load(null);
+    const flash = S.nodes.filter(n => n.path === r.path).map(n => K[n.id]);
+    S.nodes.filter(n => n.path === r.path).forEach(n => { let c = S.nodes[n.parent]; while (c) { openK.add(K[c.id]); c = c.parent === null ? null : S.nodes[c.parent]; } });
+    renderTree(flash);
+    renderGit();
+  } catch (e) { toast(e.message, "err"); return true; }
+}
+
+/* ================= git ================= */
+function suggestMsg() {
+  const m = (S.git.branch || "").match(/LES-\d+/i);
+  const pre = m ? m[0].toUpperCase() + ": " : "";
+  return lastAdded ? `${pre}добавлена страница ${lastAdded.title}` : pre ? pre + "правки меню документации" : "";
+}
+function renderGit() {
+  const g = S.git;
+  if (!g.is_repo) { $("#gitPill").innerHTML = ""; $("#gitBody").innerHTML = `<div class="note warn">${ic("warn")}<span>Эта папка не под git</span></div>`; return; }
+  const master = ["master", "main"].includes(g.branch);
+  $("#gitPill").innerHTML = `<span class="pill ${master ? "warn" : ""}">${ic("branch")}${esc(g.branch || "detached")}</span>`;
+  $("#gitUp").textContent = g.upstream ? (g.ahead ? `не запушено коммитов: ${g.ahead}` : "все запушено") : "ветка еще не в origin";
+  const ch = g.status;
+  const prevMsg = $("#gMsg") ? $("#gMsg").value : "";
+  const prevBr = $("#gBr") ? $("#gBr").value : "";
+  // путь внутри docs для кнопки удаления; удаленные (D) и файлы вне docs без корзины
+  const docRel = l => {
+    if (l.slice(0, 2).includes("D")) return null;
+    const f = fileOf(l).replace(/\/+$/, ""), pre = S.docs_dir + "/";
+    return f.startsWith(pre) && f.length > pre.length ? f.slice(pre.length) : null;
+  };
+  const fileOf = l => { const r = l.slice(3); const i = r.indexOf(" -> "); return (i >= 0 ? r.slice(i + 4) : r).replace(/^"|"$/g, ""); };
+  const syncInfo = g.behind ? `<span class="pill warn">на сервере новых коммитов: ${g.behind}</span>`
+    : g.upstream ? `<span class="muted small">ветка свежая${g.fetched ? ", проверено " + esc(g.fetched) : ""}</span>`
+    : `<span class="muted small">${g.fetched ? "проверено " + esc(g.fetched) : "ветка еще не связана с сервером"}</span>`;
+  $("#gitBody").innerHTML = `
+    <div class="syncbar"><button id="gSync">${ic("download")}Скачать обновления</button>${syncInfo}
+      ${g.base_behind ? `<button id="gMerge" title="git merge ${esc(g.base)}">${ic("merge")}Влить свежий ${esc(g.base)} (${g.base_behind})</button>` : ""}</div>
+    ${ch.length ? `<div class="glist">${ch.map(l => { const s = l.slice(0, 2).trim() || "M"; const k = s === "??" ? "N" : s[0];
+      return `<div class="gl"><span class="st ${k}">${s === "??" ? "new" : esc(s)}</span><span class="fp">${esc(l.slice(3))}</span>
+        <button class="rv" data-rv="${esc(fileOf(l))}" title="Отменить изменения в этом файле">${ic("undo")}</button>
+        ${docRel(l) !== null ? `<button class="rv" style="margin-left:0" data-rmgit="${esc(docRel(l))}" title="Удалить файл (в коммите удалится и из репозитория)">${ic("trash")}</button>` : ""}</div>`; }).join("")}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:6px"><button class="ghost small" id="gDiscardAll">${ic("trash")}Сбросить все изменения</button></div>`
+      : `<div class="note ok">${ic("check")}<span>Незакоммиченных изменений нет</span></div>`}
+    ${(g.stashes || []).length ? `<div class="gstep"><div class="lbl">${ic("download")}Отложенные правки</div>
+      <div class="glist">${g.stashes.map(s => `<div class="gl"><span class="fp">${esc(s.msg.replace(/^On [^:]+: /, ""))} <span class="muted">(${esc(s.when)})</span></span>
+        <button class="rv" style="margin-left:auto" data-spop="${esc(s.ref)}" title="Вернуть эти правки в текущую ветку">${ic("undo")} Вернуть сюда</button>
+        <button class="rv" style="margin-left:0" data-sdrop="${esc(s.ref)}" title="Удалить отложенные правки">${ic("trash")}</button></div>`).join("")}</div></div>` : ""}
+    <div class="gstep"><div class="lbl">${ic("branch")}Ветка</div>
+      ${master ? `<div class="note warn" style="margin:0 0 8px">${ic("warn")}<span>Ты на ${esc(g.branch)}. Переключись на ветку задачи или создай новую, изменения перейдут в нее.</span></div>` : ""}
+      <div class="row"><input type="text" id="gSw" list="gBrList" placeholder="Выбери ветку или начни вводить название"><datalist id="gBrList"></datalist><button id="gSwBtn">Переключить</button></div>
+      <div class="row" style="margin-top:6px"><input type="text" id="gBr" value="${esc(prevBr || "feature/LES-")}"><button id="gBrBtn">Создать ветку</button></div></div>
+    <div class="gstep"><div class="lbl">${ic("commit")}Коммит</div>
+      <div class="row"><input type="text" id="gMsg" placeholder="Что сделано" value="${esc(prevMsg || suggestMsg())}"><button id="gCommit" ${ch.length ? "" : "disabled"}>Закоммитить</button></div>
+      <div class="small muted" style="margin-top:4px">В коммит попадут только ${esc(S.yml)} и ${esc(S.docs_dir)}/</div></div>
+    <div class="gstep">
+      <button class="primary" id="gPush" ${g.upstream && !g.ahead ? "disabled" : ""}>${ic("push")}Запушить ${esc(g.branch)}</button></div>
+    ${gitOut ? (gitOut.mr ? `<a class="mr" href="${esc(gitOut.mr)}" target="_blank" rel="noopener">${ic("link")}Создать Merge Request в GitLab</a>` : "") + `<div class="out">${esc(gitOut.output || "")}</div>` : ""}
+    ${g.log.length ? `<div class="small muted" style="margin-top:12px">Последние коммиты:<br>${g.log.map(esc).join("<br>")}</div>` : ""}`;
+  $("#gSync").onclick = () => gitOp("sync");
+  if ($("#gMerge")) $("#gMerge").onclick = () => modal("Влить свежий " + g.base + "?", `<div>В ветку <b>${esc(g.branch)}</b> придут коммиты из <b>${esc(g.base)}</b> (${g.base_behind}).</div>
+      <div class="note info">${ic("info")}<span>Если будут конфликты, слияние отменится само и ветка останется как была.</span></div>`,
+      [{text: "Отмена"}, {text: ic("merge") + "Влить", cls: "primary", onClick: () => gitOp("merge_base")}]);
+  document.querySelectorAll("#gitBody [data-rv]").forEach(b => b.onclick = () => discard([b.dataset.rv]));
+  if ($("#gDiscardAll")) $("#gDiscardAll").onclick = () => discard("all");
+  $("#gBrBtn").onclick = () => gitOp("branch", {name: $("#gBr").value.trim()});
+  document.querySelectorAll("#gitBody [data-rmgit]").forEach(b => b.onclick = () => deleteDocPath(b.dataset.rmgit));
+  document.querySelectorAll("#gitBody [data-spop]").forEach(b => b.onclick = () => gitOp("stash_pop", {ref: b.dataset.spop}));
+  document.querySelectorAll("#gitBody [data-sdrop]").forEach(b => b.onclick = () => modal("Удалить отложенные правки?",
+    `<div class="note warn">${ic("warn")}<span>Эти правки удалятся насовсем, вернуть их будет нельзя.</span></div>`,
+    [{text: "Оставить"}, {text: ic("trash") + "Удалить", cls: "danger", onClick: () => gitOp("stash_drop", {ref: b.dataset.sdrop})}]));
+  // ветки: свои и с сервера, с поиском
+  api("/api/git", {repo: S.repo, op: "branches"}).then(r => {
+    if (!$("#gBrList")) return;
+    $("#gBrList").innerHTML = r.branches.map(b => `<option value="${esc(b.name)}" label="${esc((b.current ? "текущая" : b.local ? "своя" : "с сервера") + (b.date ? ", " + b.date : ""))}">`).join("");
+  }).catch(() => {});
+  $("#gSwBtn").onclick = () => {
+    const name = $("#gSw").value.trim();
+    if (!name) { toast("Выбери ветку из списка", "info"); return; }
+    if (name === g.branch) { toast("Ты уже на этой ветке", "info"); return; }
+    if (!ch.length) return switchBranch(name);
+    modal("Переключить ветку?", `<div>С <b>${esc(g.branch)}</b> на <b>${esc(name)}</b></div>
+      <div class="note warn">${ic("warn")}<span>Есть незакоммиченные изменения (${ch.length}). Они перейдут в ветку ${esc(name)}.
+        Если они мешают переключению, программа предложит отложить, закоммитить или сбросить их.</span></div>`,
+      [{text: "Отмена"}, {text: ic("branch") + "Переключить", cls: "primary", onClick: () => switchBranch(name)}]);
+  };
+  $("#gSw").addEventListener("keydown", e => { if (e.key === "Enter") $("#gSwBtn").click(); });
+  $("#gCommit").onclick = () => gitOp("commit", {message: $("#gMsg").value.trim()});
+  $("#gPush").onclick = () => modal("Запушить?", `<div>Ветка <b>${esc(g.branch)}</b> уйдет в <b>origin</b>${g.origin ? `<div class="small muted" style="margin-top:4px;word-break:break-all">${esc(g.origin)}</div>` : ""}</div>
+      ${master ? `<div class="note warn">${ic("warn")}<span>Это основная ветка. Обычно пушат ветку задачи и делают MR.</span></div>` : ""}
+      ${ch.length ? `<div class="note info">${ic("info")}<span>Есть незакоммиченные изменения, они не уйдут. Сначала закоммить.</span></div>` : ""}`,
+      [{text: "Отмена"}, {text: ic("push") + "Запушить", cls: "primary", onClick: () => gitOp("push")}]);
+}
+function discard(paths) {
+  const all = paths === "all";
+  const list = all ? S.git.status.map(l => l.slice(3)) : paths;
+  modal(all ? "Сбросить все изменения?" : "Отменить изменения в файле?", `
+    <div class="glist">${list.map(p => `<div class="gl"><span class="fp">${esc(p)}</span></div>`).join("")}</div>
+    <div class="note info">${ic("info")}<span>Измененные файлы вернутся к последнему коммиту, новые файлы и папки уберутся.
+      Копия уходит в корзину инструмента, вернуть можно кнопкой «Отменить» в сообщении внизу или вверху справа.</span></div>`,
+    [{text: "Оставить"}, {text: ic("undo") + (all ? "Сбросить все" : "Отменить изменения"), cls: "danger", onClick: async () => {
+      try { const r = await api("/api/discard", {repo: S.repo, paths}); toastUndo(r.message); } catch (e) { toast(e.message, "err"); }
+      await load();
+    }}]);
+}
+async function switchBranch(name, mode, message) {
+  let r;
+  try { r = await api("/api/git", {repo: S.repo, op: "switch", name, mode, message}); }
+  catch (e) { gitOut = {output: e.message}; toast(e.message, "err"); await load(); return; }
+  if (!r.conflict) { gitOut = r; toast(r.message); await load(); return; }
+  const cur = S.git.branch;
+  modal("Правки мешают переключить ветку", `
+    <div>Git не может переключиться на <b>${esc(name)}</b>: в этих файлах есть незакоммиченные правки, а в той ветке они другие.</div>
+    <div class="glist" style="margin-top:8px">${r.files.map(f => `<div class="gl"><span class="fp">${esc(f)}</span></div>`).join("")}</div>
+    <div class="note info" style="margin-top:10px">${ic("info")}<span><b>Отложить</b>: правки уберутся в «Отложенные правки» в блоке Git, потом вернешь их кнопкой «Вернуть сюда» (обычно на этой же ветке).<br>
+      <b>Закоммитить</b>: правки сохранятся коммитом в ветку ${esc(cur)}.<br>
+      <b>Сбросить</b>: правки уйдут в корзину программы, вернуть можно кнопкой «Отменить».</span></div>
+    <label class="fl">Сообщение коммита (для «Закоммитить»)</label><input type="text" id="swMsg" value="${esc(suggestMsg() || "Правки перед переключением ветки")}">`,
+    [{text: "Отмена"},
+     {text: ic("trash") + "Сбросить", cls: "danger", onClick: () => switchBranch(name, "discard")},
+     {text: ic("commit") + "Закоммитить", onClick: () => switchBranch(name, "commit", $("#swMsg").value)},
+     {text: ic("download") + "Отложить и переключить", cls: "primary", onClick: () => switchBranch(name, "stash")}]);
+  return true;  // окно выбора уже открыто: вызывающее окно не должно его закрыть
+}
+async function gitOp(kind, extra = {}) {
+  const btns = document.querySelectorAll("#gitBody button"); btns.forEach(b => b.disabled = true);
+  const busy = {sync: "gSync", merge_base: "gMerge", push: "gPush", commit: "gCommit", switch: "gSwBtn"}[kind];
+  if (busy && $("#" + busy)) $("#" + busy).innerHTML = ic("loader", "spin") + "Подожди...";
+  try {
+    const r = await api("/api/git", {repo: S.repo, op: kind, ...extra});
+    gitOut = r; toast(r.message);
+    if (kind === "commit") { lastAdded = null; $("#gMsg").value = ""; }
+    if (kind === "branch") $("#gBr").value = "";
+  } catch (e) { gitOut = {output: e.message}; toast(kind === "push" ? "Push не прошел, подробности в блоке Git" : e.message, "err"); }
+  await load();
+}
+
+/* ================= проверка ================= */
+function renderChecks() {
+  const orph = S.files.filter(f => !f.in_nav.length);
+  $("#cOrph").textContent = orph.length; $("#cMiss").textContent = S.missing.length;
+  document.querySelectorAll(".tabs2 button").forEach(b => b.classList.toggle("on", b.dataset.t === checkTab));
+  if (checkTab === "orph") {
+    $("#clist").innerHTML = orph.length ? orph.map(f => `<div class="ci">${ic("file", "ti")}<div class="b"><div class="t">${esc(f.title)}</div><div class="s">${esc(f.path)}</div></div>
+      <button data-add="${esc(f.path)}">${ic("plus")}В меню</button></div>`).join("")
+      : `<div class="empty">${ic("check")}Все md-файлы есть в меню</div>`;
+  } else {
+    $("#clist").innerHTML = S.missing.length ? S.missing.map(m => `<div class="ci">${ic("warn", "ti")}<div class="b"><div class="t">${esc(m.title)}</div><div class="s">${esc(m.where)} : ${esc(m.path)}</div></div>
+      <button data-rm="${m.id}">${ic("trash")}Убрать</button></div>`).join("")
+      : `<div class="empty">${ic("check")}Все ссылки в меню ведут на существующие файлы</div>`;
+  }
+}
+document.querySelector(".tabs2").addEventListener("click", e => { const b = e.target.closest("[data-t]"); if (b) { checkTab = b.dataset.t; renderChecks(); } });
+$("#clist").addEventListener("click", e => {
+  const a = e.target.closest("[data-add]"); if (a) { useRepoFile(a.dataset.add); toast("Теперь отметь разделы слева", "info"); return; }
+  const r = e.target.closest("[data-rm]"); if (r) op("delete", +r.dataset.rm);
+});
+
+/* ================= локальный сайт ================= */
+let SV = {state: "idle", log: []}, svTimer = null, svModal = false;
+function pageUrl(path) {
+  let u = path.replace(/\.md$/i, "");
+  u = /(^|\/)(index|README)$/i.test(u) ? u.replace(/(index|README)$/i, "") : u + "/";
+  return SV.url + u.replace(/^\//, "");
+}
+function svLabel() {
+  const mine = SV.repo === (S && S.repo);
+  if (SV.state === "installing" && SV.log.some(l => /Node\.js|likec4@/.test(l)) && !SV.log.some(l => l.includes("> mkdocs serve")))
+    return ["busy", "Ставлю Node.js и likec4 для диаграмм (только в первый раз)"];
+  if (SV.state === "installing") return ["busy", "Ставлю mkdocs и плагины (только в первый раз)"];
+  if (SV.state === "starting") return ["busy", "Собираю сайт, первая сборка около минуты"];
+  if (SV.state === "running" && SV.building) return ["busy", "Пересобираю после изменений"];
+  if (SV.state === "running") return ["run", !mine ? "Запущен сайт другого проекта"
+    : SV.no_node ? "Сайт работает, но без C4-диаграмм: на компьютере нет Node.js"
+    : "Сайт работает и сам обновляется после правок"];
+  if (SV.state === "error") {
+    if (SV.log.some(l => l.includes("command not found. Ensure Node.js"))) return ["err", "Для C4-диаграмм нужен Node.js и likec4. Поставь их или включи галочку «Быстро» и нажми «Перезапустить»"];
+    if (SV.log.some(l => l.includes("parsing the configuration file"))) return ["err", "Ошибка в mkdocs.yml: подробности в красном блоке над меню (нажми «Проверить снова», если его нет)"];
+    return ["err", SV.error || "Ошибка, смотри лог"];
+  }
+  return ["idle", "Локальный сайт не запущен"];
+}
+function renderServe() {
+  const b = $("#serveBtn");
+  const busy = ["installing", "starting"].includes(SV.state) || (SV.state === "running" && SV.building);
+  b.className = SV.state === "running" && !SV.building ? "run" : busy ? "busy" : "";
+  b.innerHTML = SV.state === "running" ? (SV.building ? ic("loader", "spin") + "Пересборка..." : `<span class="dot"></span>Сайт запущен${SV.fast ? " (быстро)" : ""}`)
+    : busy ? ic("loader", "spin") + "Запускаю..." : SV.state === "error" ? ic("warn") + "Сайт: ошибка" : ic("play") + "Проверить локально";
+  b.title = SV.url ? SV.url : "Запустить mkdocs serve и посмотреть сайт в браузере";
+  if (svModal) {
+    const [k, text] = svLabel();
+    $("#svState").className = "sstate " + k;
+    $("#svState").innerHTML = (k === "busy" ? ic("loader", "spin") : k === "run" ? `<span class="dot"></span>` : k === "err" ? ic("warn") : ic("info")) + `<span>${esc(text)}</span>`;
+    const lg = $("#svLog"), atBottom = lg.scrollTop + lg.clientHeight >= lg.scrollHeight - 30;
+    lg.textContent = SV.log.join("\n") || "Лог появится после запуска";
+    if (atBottom) lg.scrollTop = lg.scrollHeight;
+    $("#svOpen").disabled = SV.state !== "running";
+    $("#svStop").disabled = SV.state === "idle";
+    const nodeErr = SV.log.some(l => l.includes("command not found. Ensure Node.js"));
+    const showNode = SV.can_install_node && (SV.no_node || nodeErr) && SV.state !== "installing";
+    $("#svNode").innerHTML = showNode ? `<div class="note warn" style="align-items:center">${ic("warn")}
+      <span class="grow">Для C4-диаграмм нужен Node.js. Программа скачает портативный Node.js LTS с nodejs.org (около 30 МБ) и likec4 в свою папку.
+      Права администратора не нужны, в систему ничего не ставится.</span>
+      <button class="primary" id="svNodeBtn">${ic("download")}Поставить Node.js и likec4</button></div>` : "";
+    if ($("#svNodeBtn")) $("#svNodeBtn").onclick = async () => {
+      try { SV = await api("/api/serve/install-node", {repo: S.repo}); } catch (e) { toast(e.message, "err"); }
+      renderServe(); pollServe();
+    };
+    const fresh = SV.state === "idle" || SV.repo !== S.repo;
+    $("#svStart").innerHTML = ic(fresh ? "play" : "refresh") + (fresh ? "Запустить" : "Перезапустить");
+    $("#svStart").className = SV.state === "running" ? "" : "primary";
+    $("#svOpen").className = SV.state === "running" ? "primary" : "";
+  }
+  if (S) renderTree();
+}
+async function pollServe() {
+  try { SV = await api("/api/serve"); } catch (e) { return; }
+  const prev = renderServe._last; renderServe._last = SV.state + SV.building;
+  if (prev !== renderServe._last || svModal) renderServe();
+  if (prev && prev.startsWith("starting") && SV.state === "running") toast("Локальный сайт готов");
+  clearTimeout(svTimer);
+  const active = ["installing", "starting"].includes(SV.state) || SV.building || svModal;
+  svTimer = setTimeout(pollServe, active ? 1200 : 5000);
+}
+function openServeModal() {
+  modal("Проверить локально", `
+    <div id="svState" class="sstate idle"></div>
+    <div class="small muted" style="margin-top:8px">Запускается mkdocs serve для проекта <b>${esc(S.name)}</b>. Сайт сам пересобирается после каждой правки здесь. Окно run.bat не закрывай, вместе с ним остановится и сайт.</div>
+    <label class="check"><input type="checkbox" id="svFast" ${fastMode() ? "checked" : ""}>
+      <span><b>Быстро, без диаграмм likec4.</b> <span class="muted">Сборка за секунды, но C4-диаграммы на сайте будут пустыми. Без галочки сборка и каждая пересборка идут 1-2 минуты.</span></span></label>
+    <div id="svNode"></div>
+    <div class="slog" id="svLog"></div>`,
+    [{text: ic("stop") + "Остановить", onClick: async () => { try { toast((await api("/api/serve/stop", {})).message, "info"); } catch (e) { toast(e.message, "err"); } pollServe(); return true; }},
+     {text: ic("play") + "Запустить", onClick: startServe},
+     {text: ic("ext") + "Открыть сайт", cls: "primary", onClick: () => { window.open(SV.url, "_blank"); return true; }}]);
+  const f = document.querySelectorAll("#mFoot button");
+  f[0].id = "svStop"; f[1].id = "svStart"; f[2].id = "svOpen";
+  $("#svFast").onchange = e => {
+    fastPref = e.target.checked;
+    try { localStorage.setItem("navtool.fast", fastPref ? "1" : "0"); } catch (x) {}
+    if (SV.state !== "idle") toast("Нажми «Перезапустить», чтобы применить", "info");
+  };
+  svModal = true;
+  renderServe(); pollServe();
+}
+let fastPref = null;
+function fastMode() {
+  if (fastPref === null) { try { fastPref = localStorage.getItem("navtool.fast") === "1"; } catch (e) { fastPref = false; } }
+  return fastPref;
+}
+async function startServe() {
+  try { SV = await api("/api/serve/start", {repo: S.repo, fast: fastMode()}); } catch (e) { toast(e.message, "err"); }
+  renderServe(); pollServe();
+  return true;
+}
+$("#serveBtn").onclick = openServeModal;
+pollServe();
+
+/* ================= старт ================= */
+(async () => {
+  try {
+    const h = await api("/api/home");
+    if (h.last && await load(h.last)) { $("#app").classList.remove("hidden"); browsePath = h.last; resetForm(); return; }
+  } catch (e) {}
+  showPicker();
+})();
+</script>
+</body>
+</html>
