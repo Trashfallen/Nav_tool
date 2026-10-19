@@ -95,6 +95,8 @@ label.fl { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 
 .top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .proj { flex-direction: column; align-items: flex-start; gap: 0; padding: 4px 10px; max-width: 46vw; min-width: 0; overflow: hidden; }
 .proj .pn { font-weight: 700; }
+.ver { font-size: 11px; color: var(--muted); background: var(--surface2); border: 1px solid var(--border); border-radius: 99px; padding: 2px 8px; white-space: nowrap; }
+.ver:empty { display: none; }
 .proj .pp { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .grid { display: grid; grid-template-columns: minmax(0, var(--lw, 53%)) 16px minmax(0, 1fr); padding: 16px 18px 40px; align-items: start; }
 @media (max-width: 980px) { .grid { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 12px; } .tree-card { position: static !important; height: 70vh !important; } .grid > .split { display: none; } }
@@ -346,6 +348,7 @@ pre.diff .h { color: var(--accent); }
   <header class="top">
     <div class="brand"><div class="logo" id="logo2"></div></div>
     <button class="ghost proj" id="projBtn" title="Сменить папку"><span class="pn" id="projName"></span><span class="pp" id="projPath"></span></button>
+    <span class="ver" id="verLbl" title="Версия программы"></span>
     <span id="branchPill"></span>
     <div class="grow"></div>
     <button id="serveBtn"></button>
@@ -1011,6 +1014,7 @@ async function checkUpdate(fetchRemote = true) {
   b.classList.toggle("has", updInfo.behind > 0);
   b.className = updInfo.behind > 0 ? "has" : "ghost";
   b.innerHTML = ic("download") + (updInfo.behind > 0 ? `Обновить программу (${updInfo.behind})` : "");
+  $("#verLbl").textContent = updInfo.version ? "версия " + updInfo.version : "";
   b.title = "Версия программы: " + (updInfo.version || "?") + (updInfo.behind > 0 ? ". Есть обновление" : ". Обновлений нет (проверить еще раз)");
 }
 $("#updBtn").onclick = async () => {
