@@ -597,21 +597,91 @@ def api_sync(repo):
         if code:
             raise ValueError("pull не прошел:\n" + out)
         msg = f"Обновлено: пришло коммитов {behind}"
+    # ветки, которые уже вливали в эту: подтягиваем их новые коммиты
+    for ref in merged_refs(repo):
+        n = git(repo, "rev-list", "--count", f"HEAD..{ref}")
+        if not n.isdigit() or n == "0":
+            continue
+        short = ref.split("/", 1)[1]
+        try:
+            r = merge_with_union(repo, ref, f"из {short} влито коммитов: {n}", True)
+            msg += ". " + r["message"][0].upper() + r["message"][1:]
+            log.append(r.get("output", ""))
+        except ValueError as e:
+            msg += f". {short} не влил: {str(e).splitlines()[0]}"
+            log.append(str(e))
     return {"message": msg, "output": "\n".join(x for x in log if x)}
 
 
-def api_merge_base(repo):
+MERGED_RE = re.compile(r"^Merge (?:remote-tracking )?branch '([^']+)'(?: into \S+)?$")
+
+
+def merged_refs(repo):
+    """Ветки с сервера, которые уже вливали в текущую (по сообщениям merge-коммитов)."""
+    cur = git(repo, "branch", "--show-current")
+    if not cur or cur in ("master", "main"):
+        return []
+    base = base_ref(repo)
+    upstream = git(repo, "rev-parse", "--abbrev-ref", "@{u}")
+    rng = [f"{base}..HEAD"] if base else ["-200", "HEAD"]
+    out = []
+    for s in git(repo, "log", "--first-parent", "--merges", "--format=%s", *rng).splitlines():
+        m = MERGED_RE.match(s.strip())
+        ref = m.group(1) if m else ""
+        if (ref and ref not in out and ref not in (base, upstream)
+                and git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}")):
+            out.append(ref)
+    return out
+
+
+def api_merge_base(repo, union=False):
     base = base_ref(repo)
     if not base:
         raise ValueError("Не нашел основную ветку (origin/master)")
-    overlap_guard(repo, base, "влить master")
-    code, out = git_run(repo, "merge", "--no-edit", "--autostash", base, timeout=120)
-    if code:
-        conflicts = git(repo, "diff", "--name-only", "--diff-filter=U")
-        git_run(repo, "merge", "--abort")
-        raise ValueError(f"Слияние с {base} дало конфликты, отменил его:\n{conflicts or out}\n"
-                         "Такое лучше решать вручную или в GitLab.")
-    return {"message": f"Свежий {base} влит в ветку", "output": out}
+    return merge_with_union(repo, base, f"Свежий {base} влит в ветку", union)
+
+
+ORIGIN_CACHE = {}
+
+
+def file_origins(repo):
+    """Откуда страница, которой еще нет в master: из ветки коллеги, из своей ветки или еще не закоммичена."""
+    if git(repo, "rev-parse", "--is-inside-work-tree") != "true":
+        return {}
+    _, docs_name = docs_root(repo)
+    pre = docs_name + "/"
+    base = base_ref(repo)
+    cur = git(repo, "branch", "--show-current")
+    out = {}
+    if base:
+        key = (repo, git(repo, "rev-parse", "HEAD"), git(repo, "for-each-ref", "refs/remotes", "--format=%(objectname)"))
+        if key not in ORIGIN_CACHE:
+            upstream = git(repo, "rev-parse", "--abbrev-ref", "@{u}")
+            own = set(git(repo, "rev-list", "--first-parent", f"{base}..HEAD").split())
+            res, by_sha = {}, {}
+            for l in git(repo, "log", "--format=@%H", "--name-only", "--diff-filter=A", f"{base}..HEAD", "--", docs_name).splitlines():
+                if l.startswith("@"):
+                    sha = l[1:]
+                elif l.strip().startswith(pre) and l.strip()[len(pre):] not in res:
+                    rel = l.strip()[len(pre):]
+                    if sha in own:
+                        res[rel] = {"kind": "mine", "branch": cur}
+                        continue
+                    if sha not in by_sha:
+                        refs = git(repo, "branch", "-r", "--contains", sha, "--format=%(refname:short)").splitlines()
+                        refs = [r.strip() for r in refs if r.strip() and "/" in r and not r.strip().endswith("/HEAD")
+                                and r.strip() not in (upstream, base)]
+                        by_sha[sha] = refs[0].split("/", 1)[1] if refs else ""
+                    res[rel] = {"kind": "other", "branch": by_sha[sha]} if by_sha[sha] else {"kind": "mine", "branch": cur}
+            ORIGIN_CACHE.clear()
+            ORIGIN_CACHE[key] = res
+        out.update(ORIGIN_CACHE[key])
+    _, st = git_run(repo, "status", "--porcelain", "-uall")
+    for l in st.splitlines():
+        f = l[3:].strip().strip('"')
+        if l.startswith("??") and f.startswith(pre):
+            out[f[len(pre):]] = {"kind": "new"}
+    return out
 
 
 def api_merge_candidates(repo):
@@ -643,21 +713,78 @@ def api_merge_preview(repo, ref):
     return {"ref": ref, "commits": commits[:50], "count": len(commits), "files": files[:200], "clash": clash}
 
 
-def api_merge_branch(repo, ref):
+def api_merge_branch(repo, ref, union=False):
     """Влить ветку коллеги в свою: защита от пересечения с незакоммиченными правками, при конфликте отмена."""
     cur = git(repo, "branch", "--show-current")
     if cur in ("master", "main"):
         raise ValueError(f"Ты на {cur}. Чужую неслитую ветку вливают в свою ветку задачи: сначала создай или выбери ее")
     if not git(repo, "rev-parse", "--verify", "--quiet", ref):
         raise ValueError("Ветка не найдена: " + ref)
+    return merge_with_union(repo, ref, f"Ветка {ref} влита в {cur}", union)
+
+
+def union_yml_text(repo, name):
+    """Конфликт только в mkdocs.yml: объединяем пункты меню обеих сторон (git merge-file --union).
+    Возвращает текст, если получился правильный mkdocs.yml, иначе None."""
+    import tempfile
+    blobs = {}
+    for st in ("1", "2", "3"):
+        r = subprocess.run(["git", "-C", repo, "show", f":{st}:{name}"], capture_output=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        blobs[st] = r.stdout if r.returncode == 0 else b""
+    if not blobs["2"] or not blobs["3"]:
+        return None
+    with tempfile.TemporaryDirectory() as d:
+        paths = {}
+        for st, data in blobs.items():
+            paths[st] = os.path.join(d, st + ".yml")
+            with open(paths[st], "wb") as f:
+                f.write(data)
+        code, _ = git_run(repo, "merge-file", "--union", paths["2"], paths["1"], paths["3"])
+        if code < 0:
+            return None
+        with open(paths["2"], "rb") as f:
+            text = f.read().decode("utf-8-sig", "replace").replace("\r\n", "\n")
+    try:
+        parse_nav(text.split("\n"))
+    except Exception:
+        return None
+    if yaml_error(text):
+        return None
+    return text
+
+
+def merge_with_union(repo, ref, done_msg, union):
+    """git merge; при конфликте только в mkdocs.yml предлагаем (или делаем, если union) объединение меню."""
     overlap_guard(repo, ref, "влить ветку")
+    name = yml_path(repo).name
+    _, nl, bom, _ = read_yml(repo)
     code, out = git_run(repo, "merge", "--no-edit", "--autostash", ref, timeout=120)
-    if code:
-        conflicts = git(repo, "diff", "--name-only", "--diff-filter=U")
-        git_run(repo, "merge", "--abort")
-        raise ValueError(f"Слияние с {ref} дало конфликты, отменил его, ветка осталась как была:\n{conflicts or out}\n"
-                         "Такое лучше решать вручную или договориться с автором ветки.")
-    return {"message": f"Ветка {ref} влита в {cur}", "output": out}
+    if not code:
+        return {"message": done_msg, "output": out}
+    conflicts = [c for c in git(repo, "diff", "--name-only", "--diff-filter=U").splitlines() if c]
+    text = union_yml_text(repo, name) if conflicts == [name] else None
+    if union and text is not None:
+        data = text.replace("\n", nl).encode("utf-8")
+        yml_path(repo).write_bytes((b"\xef\xbb\xbf" if bom else b"") + data)
+        git_run(repo, "add", "--", name)
+        code2, out2 = git_run(repo, "-c", "core.editor=true", "merge", "--continue", timeout=60)
+        if code2:
+            git_run(repo, "merge", "--abort")
+            raise ValueError("Не получилось завершить слияние, отменил его:\n" + out2)
+        return {"message": done_msg + ". Меню объединено: оставлены пункты обоих", "output": out2}
+    preview = None
+    if text is not None:
+        ours = subprocess.run(["git", "-C", repo, "show", f":2:{name}"], capture_output=True,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        ours = ours.decode("utf-8-sig", "replace").replace("\r\n", "\n").split("\n")
+        preview = "\n".join(list(difflib.unified_diff(ours, text.split("\n"), name, name, n=2, lineterm=""))[2:])
+    git_run(repo, "merge", "--abort")
+    if text is not None:
+        return {"conflict": True, "union_ok": True, "diff": preview, "files": conflicts, "ref": ref,
+                "message": f"Конфликт только в {name}: можно оставить пункты меню обоих"}
+    raise ValueError(f"Слияние с {ref} дало конфликты, отменил его, ветка осталась как была:\n"
+                     + ("\n".join(conflicts) or out) + "\nТакое лучше решать вручную или договориться с автором ветки.")
 
 
 def git_branches(repo):
@@ -757,13 +884,13 @@ def api_git(req):
     if op == "sync":
         return api_sync(repo)
     if op == "merge_base":
-        return api_merge_base(repo)
+        return api_merge_base(repo, bool(req.get("union")))
     if op == "merge_candidates":
         return api_merge_candidates(repo)
     if op == "merge_preview":
         return api_merge_preview(repo, req.get("ref", ""))
     if op == "merge_branch":
-        return api_merge_branch(repo, req.get("ref", ""))
+        return api_merge_branch(repo, req.get("ref", ""), bool(req.get("union")))
     if op == "branch":
         name = (req.get("name") or "").strip()
         # имя проверяет сам git: те же правила, что при git switch -c
@@ -777,10 +904,25 @@ def api_git(req):
         if not message:
             raise ValueError("Напиши сообщение коммита")
         lines, _, _, _ = read_yml(repo)
-        code, out = git_run(repo, "add", "--", yml_path(repo).name, docs_dir_of(lines))
-        if code:
-            raise ValueError(out)
-        code, out = git_run(repo, "commit", "-m", message)
+        yml_name, docs_name = yml_path(repo).name, docs_dir_of(lines).strip("/")
+        files = req.get("files")
+        if files is None:
+            code, out = git_run(repo, "add", "--", yml_name, docs_name)
+            if code:
+                raise ValueError(out)
+            code, out = git_run(repo, "commit", "-m", message)
+        else:
+            # только отмеченные файлы; остальные правки остаются незакоммиченными
+            files = [str(f).replace("\\", "/").strip() for f in files if str(f).strip()]
+            bad = [f for f in files if ".." in f.split("/") or not (f == yml_name or f.startswith(docs_name + "/"))]
+            if bad:
+                raise ValueError("В коммит можно взять только " + yml_name + " и файлы " + docs_name + "/: " + ", ".join(bad))
+            if not files:
+                raise ValueError("Отметь хотя бы один файл для коммита")
+            code, out = git_run(repo, "add", "-A", "--", *files)
+            if code:
+                raise ValueError(out)
+            code, out = git_run(repo, "commit", "-m", message, "--", *files)
         msg = "Коммит создан"
     elif op == "push":
         code, out = git_run(repo, "push", "-u", "origin", "HEAD", timeout=180)
@@ -1012,7 +1154,7 @@ def api_state(repo):
     return {"repo": repo, "name": site_name(repo) or Path(repo).name, "yml": yml_path(repo).name,
             "sha": sha, "docs_dir": docs_name, "nodes": out_nodes, "files": files, "dirs": dirs,
             "in_nav": in_nav, "missing": missing, "git": git_state(repo), "undo": undo_list(repo),
-            "yml_error": yml_error_info(lines)}
+            "yml_error": yml_error_info(lines), "origins": file_origins(repo)}
 
 
 def yml_error_info(lines):

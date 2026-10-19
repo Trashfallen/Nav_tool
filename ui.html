@@ -64,6 +64,8 @@ label.fl { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 
 .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--accent-weak); color: var(--accent); font-weight: 600; white-space: nowrap; }
 .pill.warn { background: var(--amber-weak); color: var(--amber); }
 .pill.ok { background: var(--green-weak); color: var(--green); }
+.opill { margin-left: 6px; padding: 1px 7px; font-size: 11px; flex: none; }
+.opill svg { width: 11px; height: 11px; }
 .pill.grey { background: var(--surface2); color: var(--muted); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
 .logo { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; }
@@ -795,7 +797,7 @@ function renderTree(flashKeys) {
       ${n.path ? `<span class="tw"></span>` : `<button class="tw ${isOpen ? "open" : ""}" data-act="toggle" ${hasKids ? "" : "disabled"}>${hasKids ? ic("chev") : ""}</button>`}
       ${n.path ? "" : `<input type="checkbox" data-act="check" ${checkedK.has(K[id]) ? "checked" : ""} title="Добавить сюда">`}
       ${ic(n.path ? "file" : "folder", "ti")}
-      <span class="ttl">${hl(n.title, q)}</span>
+      <span class="ttl">${hl(n.title, q)}</span>${n.path ? originPill(n.path) : ""}
       ${n.path ? `<span class="pth" title="${esc(n.path)}">${hl(n.path, q)}</span>` : `<span class="cnt">${pageCount(id) || ""}</span>`}
       ${!id ? `<span class="acts"><button data-act="newpage" title="Новая страница">${ic("filePlus")}</button><button data-act="addsec" title="Новый раздел внутри">${ic("folderPlus")}</button></span>` : ""}
       ${id ? `<span class="acts">
@@ -1840,6 +1842,14 @@ function newPage(pk) {
   setTimeout(() => $("#npTitle").focus(), 50);
 }
 
+/* откуда страница, если ее еще нет в master */
+function originPill(path) {
+  const o = (S.origins || {})[path]; if (!o) return "";
+  if (o.kind === "other") return `<span class="pill opill" title="Пришла из ветки ${esc(o.branch)}: ты ее добавлял в свою ветку, в master ее еще нет. На других ветках ее не будет">${ic("branch")}${esc(o.branch.replace(/^feature\//, ""))}</span>`;
+  if (o.kind === "mine") return `<span class="pill grey opill" title="Добавлена в твоей ветке ${esc(o.branch)}, в master ее еще нет. Если переключиться на другую ветку, она пропадет, пока ветку не сольют">${ic("branch")}моя ветка</span>`;
+  return `<span class="pill warn opill" title="Файл еще не закоммичен: при переключении ветки или сбросе изменений он может пропасть">не закоммичен</span>`;
+}
+
 /* ================= дерево файлов docs/ ================= */
 let ftCache = {}, ftOpen = new Set([""]), leftTab = "nav";
 function fmtSize(n) { return n < 1024 ? n + " Б" : n < 1048576 ? Math.round(n / 1024) + " КБ" : (n / 1048576).toFixed(1) + " МБ"; }
@@ -1868,7 +1878,7 @@ async function renderFiles2(flash) {
       const img = /\.(png|jpe?g|gif|svg|webp|bmp|ico)$/i.test(e.name);
       out.push(`<div class="tr ffile ${e.text ? "txt" : "bin"} ${flash === e.path ? "flash" : ""}" data-fp="${esc(e.path)}" draggable="true" style="--d:${d}">
         <span class="tw"></span>${ic(img ? "image" : e.text ? "file" : "file", "ti")}
-        <span class="ttl" title="${esc(e.path)}">${esc(e.name)}</span><span class="fsz">${fmtSize(e.size)}</span>
+        <span class="ttl" title="${esc(e.path)}">${esc(e.name)}</span>${originPill(e.path)}<span class="fsz">${fmtSize(e.size)}</span>
         ${e.md ? `<span class="pill ${e.in_nav ? "ok" : "warn"}" style="margin-left:6px">${e.in_nav ? "в меню" : "нет в меню"}</span>` : ""}
         <span class="acts">
           ${e.text ? `<button data-fa="edit" title="Открыть в редакторе">${ic("code")}</button>` : ""}
@@ -2168,6 +2178,7 @@ function suggestMsg() {
   const keys = [...new Set(((S.git.branch || "").match(/LES-\d+/gi) || []).map(k => k.toUpperCase()))];
   return (keys.length ? keys.join(" ") + " " : "") + "правки";
 }
+let skipCommit = new Set();  // файлы, с которых сняли галочку коммита
 function renderGit() {
   const g = S.git;
   if (!g.is_repo) { $("#gitPill").innerHTML = ""; $("#gitBody").innerHTML = `<div class="note warn">${ic("warn")}<span>Эта папка не под git</span></div>`; return; }
@@ -2184,15 +2195,19 @@ function renderGit() {
     return f.startsWith(pre) && f.length > pre.length ? f.slice(pre.length) : null;
   };
   const fileOf = l => { const r = l.slice(3); const i = r.indexOf(" -> "); return (i >= 0 ? r.slice(i + 4) : r).replace(/^"|"$/g, ""); };
+  const canCommit = l => { const f = fileOf(l).replace(/\/+$/, ""); return f === S.yml || f.startsWith(S.docs_dir + "/"); };
+  const cpaths = l => l.slice(3).split(" -> ").map(x => x.replace(/^"|"$/g, ""));
+  const picked = ch.filter(l => canCommit(l) && !skipCommit.has(fileOf(l)));
   const syncInfo = g.behind ? `<span class="pill warn">на сервере новых коммитов: ${g.behind}</span>`
     : g.upstream ? `<span class="muted small">ветка свежая${g.fetched ? ", проверено " + esc(g.fetched) : ""}</span>`
     : `<span class="muted small">${g.fetched ? "проверено " + esc(g.fetched) : "ветка еще не связана с сервером"}</span>`;
   $("#gitBody").innerHTML = `
-    <div class="syncbar"><button id="gSync">${ic("download")}Скачать обновления</button>${syncInfo}
+    <div class="syncbar"><button id="gSync" title="Скачать с сервера свою ветку и новые коммиты веток, которые ты в нее уже добавлял">${ic("download")}Скачать обновления</button>${syncInfo}
       ${g.base_behind ? `<button id="gMerge" title="git merge ${esc(g.base)}">${ic("merge")}Влить свежий ${esc(g.base)} (${g.base_behind})</button>` : ""}
-      <button id="gMergeOther" title="Взять в свою ветку изменения из чужой ветки, которую еще не слили в master">${ic("merge")}Влить ветку коллеги</button></div>
+      <button id="gMergeOther" title="Взять в свою ветку изменения из другой ветки, которую еще не слили в master">${ic("merge")}Добавить ветку</button></div>
     ${ch.length ? `<div class="glist">${ch.map(l => { const s = l.slice(0, 2).trim() || "M"; const k = s === "??" ? "N" : s[0];
-      return `<div class="gl"><span class="st ${k}">${s === "??" ? "new" : esc(s)}</span><span class="fp">${esc(l.slice(3))}</span>
+      return `<div class="gl"><input type="checkbox" data-cpick="${esc(fileOf(l))}" ${canCommit(l) ? (skipCommit.has(fileOf(l)) ? "" : "checked") : "disabled"}
+          title="${canCommit(l) ? "Взять в коммит" : "Вне " + esc(S.yml) + " и " + esc(S.docs_dir) + "/, в коммит не попадет"}" style="margin:0;flex:none"><span class="st ${k}">${s === "??" ? "new" : esc(s)}</span><span class="fp">${esc(l.slice(3))}</span>
         <button class="rv" data-rv="${esc(fileOf(l))}" title="Отменить изменения в этом файле">${ic("undo")}</button>
         ${docRel(l) !== null ? `<button class="rv" style="margin-left:0" data-rmgit="${esc(docRel(l))}" title="Удалить файл (в коммите удалится и из репозитория)">${ic("trash")}</button>` : ""}</div>`; }).join("")}</div>
       <div class="row" style="justify-content:flex-end;margin-top:6px"><button class="ghost small" id="gDiscardAll">${ic("trash")}Сбросить все изменения</button></div>`
@@ -2206,8 +2221,9 @@ function renderGit() {
       <div class="row"><input type="text" id="gSw" list="gBrList" placeholder="Выбери ветку или начни вводить название"><datalist id="gBrList"></datalist><button id="gSwBtn">Переключить</button></div>
       <div class="row" style="margin-top:6px"><input type="text" id="gBr" value="${esc(prevBr || "feature/LES-")}"><button id="gBrBtn">Создать ветку</button></div></div>
     <div class="gstep"><div class="lbl">${ic("commit")}Коммит</div>
-      <div class="row"><input type="text" id="gMsg" placeholder="Что сделано" value="${esc(prevMsg || suggestMsg())}"><button id="gCommit" ${ch.length ? "" : "disabled"}>Закоммитить</button></div>
-      <div class="small muted" style="margin-top:4px">В коммит попадут только ${esc(S.yml)} и ${esc(S.docs_dir)}/</div></div>
+      <div class="row"><input type="text" id="gMsg" placeholder="Что сделано" value="${esc(prevMsg || suggestMsg())}"><button id="gCommit" ${picked.length ? "" : "disabled"}>Закоммитить</button></div>
+      <div class="small muted" style="margin-top:4px">${ch.length ? `В коммит попадут отмеченные галочками файлы: ${picked.length} из ${ch.filter(canCommit).length}. Неотмеченные останутся незакоммиченными.`
+        : `В коммит попадут только ${esc(S.yml)} и ${esc(S.docs_dir)}/`}</div></div>
     <div class="gstep">
       <button class="primary" id="gPush" ${g.upstream && !g.ahead ? "disabled" : ""}>${ic("push")}Запушить ${esc(g.branch)}</button></div>
     ${gitOut ? (gitOut.mr ? `<a class="mr" href="${esc(gitOut.mr)}" target="_blank" rel="noopener">${ic("link")}Создать Merge Request в GitLab</a>` : "") + `<div class="out">${esc(gitOut.output || "")}</div>` : ""}
@@ -2241,7 +2257,9 @@ function renderGit() {
       [{text: "Отмена"}, {text: ic("branch") + "Переключить", cls: "primary", onClick: () => switchBranch(name)}]);
   };
   $("#gSw").addEventListener("keydown", e => { if (e.key === "Enter") $("#gSwBtn").click(); });
-  $("#gCommit").onclick = () => gitOp("commit", {message: $("#gMsg").value.trim()});
+  document.querySelectorAll("#gitBody [data-cpick]").forEach(b => b.onchange = () => {
+    b.checked ? skipCommit.delete(b.dataset.cpick) : skipCommit.add(b.dataset.cpick); renderGit(); });
+  $("#gCommit").onclick = () => gitOp("commit", {message: $("#gMsg").value.trim(), files: picked.flatMap(cpaths)});
   $("#gPush").onclick = () => modal("Запушить?", `<div>Ветка <b>${esc(g.branch)}</b> уйдет в <b>origin</b>${g.origin ? `<div class="small muted" style="margin-top:4px;word-break:break-all">${esc(g.origin)}</div>` : ""}</div>
       ${master ? `<div class="note warn">${ic("warn")}<span>Это основная ветка. Обычно пушат ветку задачи и делают MR.</span></div>` : ""}
       ${ch.length ? `<div class="note info">${ic("info")}<span>Есть незакоммиченные изменения, они не уйдут. Сначала закоммить.</span></div>` : ""}`,
@@ -2259,10 +2277,10 @@ function discard(paths) {
       await load();
     }}]);
 }
-/* влить ветку коллеги (не слитую в master) в свою ветку */
+/* добавить в свою ветку другую ветку (не слитую в master) */
 async function mergeOtherBranch() {
   const cur = S.git.branch, onMaster = ["master", "main"].includes(cur);
-  modal("Влить ветку коллеги", `<div class="muted">Скачиваю свежий список веток с сервера...</div>`, [{text: "Закрыть"}]);
+  modal("Добавить ветку", `<div class="muted">Скачиваю свежий список веток с сервера...</div>`, [{text: "Закрыть"}]);
   let r;
   try { r = await api("/api/git", {repo: S.repo, op: "merge_candidates"}); } catch (e) { toast(e.message, "err"); closeModal(true); return; }
   const draw = q => {
@@ -2273,8 +2291,9 @@ async function mergeOtherBranch() {
       <span class="pill ${b.new ? "ok" : "grey"}">${b.new ? "+" + b.new + " коммит." : "уже есть у тебя"}</span></div>`).join("")
       || `<div class="empty">${ic("info")}Ничего не найдено</div>`;
   };
-  modal("Влить ветку коллеги", `
-    <div>Изменения из выбранной ветки придут в твою ветку <b>${esc(cur)}</b>. Удобно, когда коллега завел папку или страницы, а его MR еще не слили.</div>
+  modal("Добавить ветку", `
+    <div>Изменения из выбранной ветки придут в твою ветку <b>${esc(cur)}</b>. Удобно, когда в другой ветке завели папку или страницы, а MR еще не слили.
+      Потом «Скачать обновления» будет сам подтягивать новые коммиты этой ветки.</div>
     ${onMaster ? `<div class="note warn">${ic("warn")}<span>Ты на ${esc(cur)}. Чужую неслитую ветку вливают в свою ветку задачи: сначала создай или выбери ее в блоке «Ветка».</span></div>` : ""}
     <input type="text" id="mcQ" placeholder="Поиск: номер задачи, автор, название" style="margin-top:10px">
     <div class="flist" id="mcList"></div>`, [{text: "Закрыть"}]);
@@ -2296,8 +2315,8 @@ async function mergeOtherBranch() {
         return `<div class="gl"><span class="st ${k === "A" ? "N" : k}">${esc(st[k] || s)}</span><span class="fp">${esc(rest.join(" -> "))}</span></div>`; }).join("")}</div>
       ${pv.clash.length ? `<div class="note warn">${ic("warn")}<span>В этих файлах у тебя есть незакоммиченные правки, а ветка их тоже меняет: ${pv.clash.map(esc).join(", ")}.
         Сначала закоммить или сбрось их.</span></div>` : ""}
-      <div class="note info">${ic("info")}<span>Пока MR коллеги не слит, в твоем MR будут видны и его коммиты. Когда его MR сольют в master, они из твоего MR пропадут сами.
-        Если будет конфликт, вливание отменится и ветка останется как была.</span></div>`,
+      <div class="note info">${ic("info")}<span>Пока MR той ветки не слит, в твоем MR будут видны и ее коммиты. Когда ее сольют в master, они из твоего MR пропадут сами.
+        Если обе ветки правили меню, программа предложит оставить пункты обеих. Другие конфликты отменят вливание, ветка останется как была.</span></div>`,
       [{text: "Назад", onClick: () => { mergeOtherBranch(); return true; }},
        {text: ic("merge") + "Влить", cls: "primary", disabled: onMaster || pv.clash.length > 0, onClick: () => gitOp("merge_branch", {ref: b.ref})}]);
   };
@@ -2328,11 +2347,24 @@ async function gitOp(kind, extra = {}) {
   if (busy && $("#" + busy)) $("#" + busy).innerHTML = ic("loader", "spin") + "Подожди...";
   try {
     const r = await api("/api/git", {repo: S.repo, op: kind, ...extra});
-    gitOut = r; toast(r.message);
-    if (kind === "commit") { lastAdded = null; $("#gMsg").value = ""; }
+    if (r.conflict && r.union_ok) { gitOut = null; await load(); return mergeUnionAsk(kind, extra, r); }
+    gitOut = r; toast(r.message, "ok", 6000);
+    if (kind === "commit") { lastAdded = null; $("#gMsg").value = ""; skipCommit.clear(); }
     if (kind === "branch") $("#gBr").value = "";
   } catch (e) { gitOut = {output: e.message}; toast(kind === "push" ? "Push не прошел, подробности в блоке Git" : e.message, "err"); }
   await load();
+}
+
+/* конфликт только в mkdocs.yml: показать, что получится, и слить, оставив пункты обеих веток */
+function mergeUnionAsk(kind, extra, r) {
+  const rows = (r.diff || "").split("\n").filter(l => !l.startsWith("@@")).map(l =>
+    `<div class="gl"><span class="st ${l[0] === "+" ? "A" : l[0] === "-" ? "D" : ""}">${l[0] === "+" || l[0] === "-" ? l[0] : ""}</span><span class="fp" style="white-space:pre">${esc(l.slice(1))}</span></div>`).join("");
+  modal("Обе ветки правили меню", `
+    <div>И в твоей ветке, и в <b>${esc(r.ref)}</b> добавили пункты в одно место ${esc(S.yml)}. Git сам не решает, чьи оставить.</div>
+    <div style="margin-top:10px">Если оставить пункты обеих, твое меню станет таким (зеленым то, что добавится):</div>
+    <div class="glist" style="margin-top:6px;max-height:320px">${rows}</div>
+    <div class="note info">${ic("info")}<span>Пока ничего не изменилось: вливание отменено, ветка как была. Проверь меню после слияния, при необходимости поправь порядок.</span></div>`,
+    [{text: "Отмена"}, {text: ic("merge") + "Слить, оставив пункты обеих", cls: "primary", onClick: () => gitOp(kind, {...extra, union: true})}]);
 }
 
 /* ================= проверка ================= */
