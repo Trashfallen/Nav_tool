@@ -746,7 +746,7 @@ function renderYmlErr() {
 function renderTop() {
   const g = S.git;
   const master = g.is_repo && ["master", "main"].includes(g.branch);
-  $("#branchPill").innerHTML = g.is_repo ? `<span class="pill ${master ? "warn" : ""}" title="${master ? "Ты на основной ветке" : ""}">${ic("branch")}${esc(g.branch || "detached")}</span>` : "";
+  $("#branchPill").innerHTML = g.is_repo ? `<span class="pill ${master ? "warn" : ""}" title="${master ? "Ты на основной ветке" : ""}">${ic("branch")}${esc(g.branch || "detached")}</span>${mergedPill(g)}` : "";
   const n = S.undo.length;
   $("#undoBtn").innerHTML = ic("undo") + "Отменить" + (n ? ` <span class="pill grey">${n}</span>` : "");
   $("#undoBtn").disabled = !n;
@@ -2179,11 +2179,15 @@ function suggestMsg() {
   return (keys.length ? keys.join(" ") + " " : "") + "правки";
 }
 let skipCommit = new Set();  // файлы, с которых сняли галочку коммита
+function mergedPill(g) {
+  return (g.merged || []).length
+    ? `<span class="pill grey" style="margin-left:6px" title="Ветки, которые добавлены в твою: «Скачать обновления» подтягивает их новые коммиты">доп. ветки: ${g.merged.map(m => esc(m.replace(/^feature\//, ""))).join(", ")}</span>` : "";
+}
 function renderGit() {
   const g = S.git;
   if (!g.is_repo) { $("#gitPill").innerHTML = ""; $("#gitBody").innerHTML = `<div class="note warn">${ic("warn")}<span>Эта папка не под git</span></div>`; return; }
   const master = ["master", "main"].includes(g.branch);
-  $("#gitPill").innerHTML = `<span class="pill ${master ? "warn" : ""}">${ic("branch")}${esc(g.branch || "detached")}</span>`;
+  $("#gitPill").innerHTML = `<span class="pill ${master ? "warn" : ""}">${ic("branch")}${esc(g.branch || "detached")}</span>${mergedPill(g)}`;
   $("#gitUp").textContent = g.upstream ? (g.ahead ? `не запушено коммитов: ${g.ahead}` : "все запушено") : "ветка еще не в origin";
   const ch = g.status;
   const prevMsg = $("#gMsg") ? $("#gMsg").value : "";
@@ -2347,7 +2351,7 @@ async function gitOp(kind, extra = {}) {
   if (busy && $("#" + busy)) $("#" + busy).innerHTML = ic("loader", "spin") + "Подожди...";
   try {
     const r = await api("/api/git", {repo: S.repo, op: kind, ...extra});
-    if (r.conflict && r.union_ok) { gitOut = null; await load(); return mergeUnionAsk(kind, extra, r); }
+    if (r.conflict && r.union_ok) { gitOut = null; await load(); mergeUnionAsk(kind, extra, r); return true; }
     gitOut = r; toast(r.message, "ok", 6000);
     if (kind === "commit") { lastAdded = null; $("#gMsg").value = ""; skipCommit.clear(); }
     if (kind === "branch") $("#gBr").value = "";

@@ -536,6 +536,7 @@ def git_state(repo):
             "upstream": upstream, "ahead": int(ahead) if ahead.isdigit() else None,
             "behind": int(behind) if behind.isdigit() else None,
             "base": base, "base_behind": base_behind,
+            "merged": [r.split("/", 1)[1] for r in merged_refs(repo)],
             "fetched": cfg.get("fetched", {}).get(repo),
             "status": [l for l in status.splitlines() if l.strip()],
             "log": git(repo, "log", "-3", "--pretty=format:%h %s").splitlines(),
