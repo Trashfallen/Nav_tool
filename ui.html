@@ -2264,7 +2264,7 @@ function renderGit() {
   document.querySelectorAll("#gitBody [data-cpick]").forEach(b => b.onchange = () => {
     b.checked ? skipCommit.delete(b.dataset.cpick) : skipCommit.add(b.dataset.cpick); renderGit(); });
   $("#gCommit").onclick = () => gitOp("commit", {message: $("#gMsg").value.trim(), files: picked.flatMap(cpaths)});
-  $("#gPush").onclick = () => modal("Запушить?", `<div>Ветка <b>${esc(g.branch)}</b> уйдет в <b>origin</b>${g.origin ? `<div class="small muted" style="margin-top:4px;word-break:break-all">${esc(g.origin)}</div>` : ""}</div>
+  $("#gPush").onclick = () => (g.merged || []).length ? pushClean(g) : modal("Запушить?", `<div>Ветка <b>${esc(g.branch)}</b> уйдет в <b>origin</b>${g.origin ? `<div class="small muted" style="margin-top:4px;word-break:break-all">${esc(g.origin)}</div>` : ""}</div>
       ${master ? `<div class="note warn">${ic("warn")}<span>Это основная ветка. Обычно пушат ветку задачи и делают MR.</span></div>` : ""}
       ${ch.length ? `<div class="note info">${ic("info")}<span>Есть незакоммиченные изменения, они не уйдут. Сначала закоммить.</span></div>` : ""}`,
       [{text: "Отмена"}, {text: ic("push") + "Запушить", cls: "primary", onClick: () => gitOp("push")}]);
@@ -2319,7 +2319,7 @@ async function mergeOtherBranch() {
         return `<div class="gl"><span class="st ${k === "A" ? "N" : k}">${esc(st[k] || s)}</span><span class="fp">${esc(rest.join(" -> "))}</span></div>`; }).join("")}</div>
       ${pv.clash.length ? `<div class="note warn">${ic("warn")}<span>В этих файлах у тебя есть незакоммиченные правки, а ветка их тоже меняет: ${pv.clash.map(esc).join(", ")}.
         Сначала закоммить или сбрось их.</span></div>` : ""}
-      <div class="note info">${ic("info")}<span>Пока MR той ветки не слит, в твоем MR будут видны и ее коммиты. Когда ее сольют в master, они из твоего MR пропадут сами.
+      <div class="note info">${ic("info")}<span>Ветка вливается только у тебя: при пуше программа отделит ее изменения, в GitLab уйдут только твои.
         Если обе ветки правили меню, программа предложит оставить пункты обеих. Другие конфликты отменят вливание, ветка останется как была.</span></div>`,
       [{text: "Назад", onClick: () => { mergeOtherBranch(); return true; }},
        {text: ic("merge") + "Влить", cls: "primary", disabled: onMaster || pv.clash.length > 0, onClick: () => gitOp("merge_branch", {ref: b.ref})}]);
@@ -2357,6 +2357,28 @@ async function gitOp(kind, extra = {}) {
     if (kind === "branch") $("#gBr").value = "";
   } catch (e) { gitOut = {output: e.message}; toast(kind === "push" ? "Push не прошел, подробности в блоке Git" : e.message, "err"); }
   await load();
+}
+
+/* push ветки с доп. ветками: на сервер уходит только свое */
+async function pushClean(g) {
+  modal("Запушить?", `<div class="muted">Отделяю изменения доп. веток...</div>`, [{text: "Закрыть"}]);
+  let r;
+  try { r = await api("/api/git", {repo: S.repo, op: "push_preview"}); } catch (e) { closeModal(true); toast(e.message, "err", 9000); return; }
+  if (r.nothing) { closeModal(true); toast("Отправлять нечего: на сервере уже все твои изменения", "info"); return; }
+  const st = {A: "new", M: "M", D: "D", R: "R"};
+  modal("Запушить только свое?", `
+    <div>Ветка <b>${esc(g.branch)}</b> уйдет в <b>origin</b> без изменений доп. веток: <b>${r.refs.map(esc).join(", ")}</b>.
+      У тебя локально они остаются, как были.</div>
+    <div style="margin-top:10px">В MR будут только эти файлы (${r.files.length}):</div>
+    <div class="glist" style="margin-top:6px">${r.files.map(f => { const [s, ...rest] = f.split("\t"); const k = s[0];
+      return `<div class="gl"><span class="st ${k === "A" ? "N" : k}">${esc(st[k] || s)}</span><span class="fp">${esc(rest.join(" -> "))}</span></div>`; }).join("")
+      || `<div class="gl"><span class="fp muted">нет своих изменений</span></div>`}</div>
+    ${r.rewrite ? `<div class="note warn">${ic("warn")}<span>На сервере в твоей ветке уже лежат изменения доп. веток (их запушили раньше).
+      Программа перезапишет твою ветку на сервере и уберет их. Ветки коллег на сервере не трогаются, твои изменения сохранятся.</span></div>` : ""}
+    ${r.touched.length ? `<div class="note warn">${ic("warn")}<span>Эти файлы из доп. веток ты правил сам, они уйдут целиком в твоей версии: ${r.touched.map(esc).join(", ")}.</span></div>` : ""}
+    ${(g.status || []).length ? `<div class="note info">${ic("info")}<span>Есть незакоммиченные изменения, они не уйдут. Сначала закоммить.</span></div>` : ""}
+    <div class="note info">${ic("info")}<span>Если твои страницы ссылаются на страницы доп. веток, на сайте эти ссылки заработают, когда доп. ветки сольют в master.</span></div>`,
+    [{text: "Отмена"}, {text: ic("push") + (r.rewrite ? "Перезаписать ветку на сервере" : "Запушить только свое"), cls: "primary", onClick: () => gitOp("push")}]);
 }
 
 /* конфликт только в mkdocs.yml: показать, что получится, и слить, оставив пункты обеих веток */

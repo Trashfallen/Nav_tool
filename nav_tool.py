@@ -525,6 +525,8 @@ def git_state(repo):
     upstream = git(repo, "rev-parse", "--abbrev-ref", "@{u}")
     ahead = git(repo, "rev-list", "--count", "@{u}..HEAD") if upstream else ""
     behind = git(repo, "rev-list", "--count", "HEAD..@{u}") if upstream else ""
+    if upstream:
+        ahead, behind = clean_counts(repo, ahead, behind)
     branch = git(repo, "branch", "--show-current")
     base = base_ref(repo)
     base_behind = None
@@ -584,6 +586,8 @@ def api_sync(repo):
     upstream = git(repo, "rev-parse", "--abbrev-ref", "@{u}")
     behind = git(repo, "rev-list", "--count", "HEAD..@{u}") if upstream else "0"
     ahead = git(repo, "rev-list", "--count", "@{u}..HEAD") if upstream else "0"
+    if upstream:
+        ahead, behind = clean_counts(repo, ahead, behind)
     if not upstream:
         msg = "Скачал обновления. Текущая ветка еще не связана с сервером, обновлять ее нечем"
     elif behind == "0":
@@ -617,21 +621,278 @@ def api_sync(repo):
 MERGED_RE = re.compile(r"^Merge (?:remote-tracking )?branch '([^']+)'(?: into \S+)?$")
 
 
-def merged_refs(repo):
-    """Ветки с сервера, которые уже вливали в текущую (по сообщениям merge-коммитов)."""
+def clean_counts(repo, ahead, behind):
+    """Ветка отправлена без доп. веток: на сервере свой коммит, сравниваем с тем, что было при отправке."""
+    rec = published(repo, git(repo, "branch", "--show-current"))
+    if not rec or git(repo, "rev-parse", "@{u}") != rec["sha"]:
+        return ahead, behind
+    head = git(repo, "rev-parse", "HEAD")
+    if head == rec["head"]:
+        return "0", "0"
+    n = git(repo, "rev-list", "--count", "--first-parent", f"{rec['head']}..HEAD")
+    return (n if n.isdigit() else "1"), "0"
+
+
+def merged_tips(repo):
+    """Доп. ветки, влитые в текущую: {ref: коммит этой ветки на момент последнего вливания}.
+    Ветки, которые уже целиком в master, не считаются."""
     cur = git(repo, "branch", "--show-current")
     if not cur or cur in ("master", "main"):
-        return []
+        return {}
     base = base_ref(repo)
     upstream = git(repo, "rev-parse", "--abbrev-ref", "@{u}")
     rng = [f"{base}..HEAD"] if base else ["-200", "HEAD"]
-    out = []
-    for s in git(repo, "log", "--first-parent", "--merges", "--format=%s", *rng).splitlines():
-        m = MERGED_RE.match(s.strip())
+    out = {}
+    for l in git(repo, "log", "--first-parent", "--merges", "--format=%P%x09%s", *rng).splitlines():
+        parents, _, subj = l.partition("\t")
+        m = MERGED_RE.match(subj.strip())
+        ps = parents.split()
         ref = m.group(1) if m else ""
-        if (ref and ref not in out and ref not in (base, upstream)
-                and git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}")):
-            out.append(ref)
+        if not ref or ref in out or ref in (base, upstream) or len(ps) < 2:
+            continue
+        if not git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}"):
+            continue
+        if base and git_run(repo, "merge-base", "--is-ancestor", f"refs/remotes/{ref}", base)[0] == 0:
+            continue
+        out[ref] = ps[1]
+    return out
+
+
+def merged_refs(repo):
+    """Ветки с сервера, которые уже вливали в текущую (по сообщениям merge-коммитов)."""
+    return list(merged_tips(repo))
+
+
+def blob_text(repo, rev, path):
+    r = subprocess.run(["git", "-C", repo, "show", f"{rev}:{path}"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return r.stdout.decode("utf-8-sig", "replace") if r.returncode == 0 else None
+
+
+def find_block(lines, blk, before=None):
+    """Индекс, с которого в lines идет блок blk; при нескольких вхождениях - то, перед которым строка before."""
+    hits = [i for i in range(len(lines) - len(blk) + 1) if lines[i:i + len(blk)] == blk]
+    for i in hits:
+        if before is not None and i > 0 and lines[i - 1] == before:
+            return i
+    return hits[0] if hits else None
+
+
+def carry_patch(cur, old, new):
+    """Перенести построчную правку old -> new на текст cur (блоки ищутся по содержимому)."""
+    res = list(cur)
+    ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+    missed = 0
+    for tag, i1, i2, j1, j2 in reversed(ops):
+        if tag == "equal":
+            continue
+        blk, rep = old[i1:i2], new[j1:j2]
+        before = old[i1 - 1] if i1 else None
+        if blk:
+            pos = find_block(res, blk, before)
+            if pos is None and not rep:
+                # блок разорван своими строками: убираем строки по одной, заголовки - только опустевшие
+                ind = lambda s: len(s) - len(s.lstrip(" -"))
+                heads = [h for h in blk if h.rstrip().endswith(":")]
+                for h in blk:
+                    if h in heads or not h.strip():
+                        continue
+                    hits = [i for i, l in enumerate(res) if l == h]
+                    if len(hits) != 1:
+                        missed += 1
+                        continue
+                    del res[hits[0]]
+                for h in reversed(heads):
+                    hits = [i for i, l in enumerate(res) if l == h]
+                    if len(hits) != 1:
+                        continue
+                    i = hits[0]
+                    if not (i + 1 < len(res) and res[i + 1].strip() and ind(res[i + 1]) > ind(h)):
+                        del res[i]
+                continue
+            if pos is None:
+                missed += 1
+                continue
+            if not rep:
+                # заголовок раздела остается, если в нем есть строки, которых нет в убираемом блоке (свои страницы)
+                ind = lambda s: len(s) - len(s.lstrip(" -"))
+                nxt = res[pos + len(blk)] if pos + len(blk) < len(res) else None
+                rep = [h for k, h in enumerate(blk) if h.rstrip().endswith(":") and nxt is not None and nxt.strip()
+                       and ind(nxt) > ind(h) and all(ind(x) > ind(h) for x in blk[k + 1:] if x.strip())]
+            res[pos:pos + len(blk)] = rep
+        else:
+            # вставка: после строки, которая стояла перед этим местом
+            if before is None:
+                res[0:0] = rep
+                continue
+            after = old[i1] if i1 < len(old) else None
+            cand = [i for i, l in enumerate(res) if l == before]
+            pos = next((i for i in cand if after is None or (i + 1 < len(res) and res[i + 1] == after)), cand[0] if cand else None)
+            if pos is None:
+                missed += 1
+                continue
+            res[pos + 1:pos + 1] = rep
+    return res, missed
+
+
+def write_tree_with(repo, tree, fix):
+    """Новый tree: tree с заменой файлов (path -> blob или None для удаления)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(d, "index"))
+        kw = dict(capture_output=True, text=True, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        subprocess.run(["git", "-C", repo, "read-tree", tree], check=True, **kw)
+        for path, blob in fix.items():
+            if blob is None:
+                subprocess.run(["git", "-C", repo, "update-index", "--force-remove", "--", path], check=True, **kw)
+            else:
+                subprocess.run(["git", "-C", repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"], check=True, **kw)
+        return subprocess.run(["git", "-C", repo, "write-tree"], check=True, **kw).stdout.strip()
+
+
+def hash_text(repo, text):
+    r = subprocess.run(["git", "-C", repo, "hash-object", "-w", "--stdin"], input=text.encode("utf-8"), capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return r.stdout.decode().strip()
+
+
+def clean_tree(repo, yname):
+    """Состояние HEAD без изменений доп. веток: (tree, fork, тронутые чужие файлы, доп. ветки)."""
+    tips = merged_tips(repo)
+    base = base_ref(repo)
+    fork = git(repo, "merge-base", "HEAD", base)
+    tree = git(repo, "rev-parse", "HEAD^{tree}")
+    raw = blob_text(repo, "HEAD", yname) or ""
+    nl = "\r\n" if "\r\n" in raw else "\n"
+    yml = raw.replace("\r\n", "\n")
+    touched = []
+    for ref, tip in tips.items():
+        mb = git(repo, "merge-base", tip, fork)
+        code, out = git_run(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages",
+                            f"--merge-base={tip}", tree, mb, timeout=60)
+        rows = [l for l in out.splitlines() if l.strip()]
+        if code not in (0, 1) or not rows or not re.fullmatch(r"[0-9a-f]{40,64}", rows[0]):
+            raise ValueError("Не смог отделить изменения ветки " + ref + ":\n" + out)
+        fix = {}
+        for c in rows[1:]:
+            if c == yname:
+                continue
+            # файл из доп. ветки, который ты тоже правил: остается в твоей версии
+            blob = git(repo, "rev-parse", "--verify", "--quiet", f"{tree}:{c}")
+            fix[c] = blob or None
+            touched.append(c)
+        y_old = (blob_text(repo, tip, yname) or "").replace("\r\n", "\n")
+        y_new = (blob_text(repo, mb, yname) or "").replace("\r\n", "\n")
+        if y_old != y_new:
+            lines, missed = carry_patch(yml.split("\n"), y_old.split("\n"), y_new.split("\n"))
+            yml = "\n".join(lines)
+        fix[yname] = hash_text(repo, yml.replace("\n", nl))
+        tree = write_tree_with(repo, rows[0], fix)
+    # проверка: mkdocs.yml цел и не ссылается на страницы, которых в отправке нет
+    lines = yml.split("\n")
+    if yaml_error(yml):
+        raise ValueError(f"После отделения доп. веток {yname} получился с ошибкой, отправка отменена")
+    nodes, _, _ = parse_nav(lines)
+    docs = docs_dir_of(lines).strip("/")
+    have = set(git(repo, "ls-tree", "-r", "--name-only", tree, "--", docs + "/").splitlines())
+    lost = sorted({n["path"] for n in nodes if n.get("path") and not re.match(r"^[a-z]+://", n["path"])
+                   and f"{docs}/{n['path']}" not in have})
+    if lost:
+        raise ValueError("Не смог чисто отделить доп. ветки: в меню остались страницы, которых не будет в отправке:\n"
+                         + "\n".join(lost[:15]) + "\nОтправка отменена, ничего не изменилось.")
+    return tree, fork, sorted(set(touched)), list(tips)
+
+
+def published(repo, branch):
+    return load_config().get("published", {}).get(f"{repo}|{branch}")
+
+
+def api_push(repo, dry=False):
+    """Push. Если в ветку влиты доп. ветки, на сервер уходят только свои изменения:
+    отдельный коммит с тем же содержимым, но без изменений доп. веток. Локальная ветка не меняется."""
+    branch = git(repo, "branch", "--show-current")
+    tips = merged_tips(repo) if branch else {}
+    if not tips:
+        if dry:
+            return {"clean": False}
+        code, out = git_run(repo, "push", "-u", "origin", "HEAD", timeout=180)
+        if code:
+            raise ValueError(out or "git завершился с ошибкой")
+        return {"message": "Запушено", "output": out}
+    yname = yml_path(repo).name
+    tree, fork, touched, refs = clean_tree(repo, yname)
+    upstream = git(repo, "rev-parse", "--abbrev-ref", "@{u}")
+    remote = git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    # если доп. ветки уже уходили на сервер, ветку на сервере откатываем до последнего коммита без них
+    on_top = remote
+    if remote:
+        extra = extra_parents(repo)
+        on_top = None
+        for c in git(repo, "rev-list", "--first-parent", "-300", remote).splitlines():
+            if not any(git_run(repo, "merge-base", "--is-ancestor", p, c)[0] == 0 for p in extra):
+                on_top = c
+                break
+    rewrite = bool(remote) and on_top != remote
+    parents = [on_top] if on_top else []
+    if not on_top or git_run(repo, "merge-base", "--is-ancestor", fork, on_top)[0] != 0:
+        parents.append(fork)  # master, влитый в ветку, уходит как обычное вливание master
+    files = [l for l in git(repo, "diff", "--name-status", fork, tree).splitlines() if l.strip()]
+    same = bool(on_top) and len(parents) == 1 and git(repo, "rev-parse", f"{on_top}^{{tree}}") == tree
+    nothing = same and not rewrite
+    if dry:
+        return {"clean": True, "refs": [r.split("/", 1)[1] for r in refs], "files": files, "touched": touched,
+                "nothing": nothing, "rewrite": rewrite}
+    rec = published(repo, branch)
+    if nothing:
+        cfg = load_config()
+        cfg.setdefault("published", {})[f"{repo}|{branch}"] = {"head": git(repo, "rev-parse", "HEAD"), "sha": remote}
+        save_config(cfg)
+        return {"message": "Отправлять нечего: на сервере уже все твои изменения", "output": ""}
+    if same:
+        sha = on_top
+    else:
+        since = rec["head"] if rec and git_run(repo, "merge-base", "--is-ancestor", rec["head"], "HEAD")[0] == 0 else (on_top or fork)
+        subj = []
+        for s in git(repo, "log", "--first-parent", "--no-merges", "--format=%s", f"{since}..HEAD").splitlines():
+            if s.strip() and s not in subj:
+                subj.append(s)
+        msg = subj[0] if subj else f"{branch} правки"
+        if len(subj) > 1:
+            msg += "\n\n" + "\n".join(reversed(subj))
+        code, sha = git_run(repo, "commit-tree", tree, *sum((["-p", p] for p in parents), []), "-m", msg)
+        if code or not re.fullmatch(r"[0-9a-f]{40,64}", sha.strip()):
+            raise ValueError("Не смог собрать коммит для отправки:\n" + sha)
+        sha = sha.strip()
+    args = ["push", "origin", f"{sha}:refs/heads/{branch}"]
+    if rewrite:
+        args.insert(1, f"--force-with-lease=refs/heads/{branch}:{remote}")
+    code, out = git_run(repo, *args, timeout=180)
+    if code:
+        raise ValueError(out or "git завершился с ошибкой")
+    git_run(repo, "fetch", "origin", branch, timeout=60)
+    if not upstream:
+        git_run(repo, "branch", f"--set-upstream-to=origin/{branch}")
+    cfg = load_config()
+    cfg.setdefault("published", {})[f"{repo}|{branch}"] = {"head": git(repo, "rev-parse", "HEAD"), "sha": sha}
+    save_config(cfg)
+    short = ", ".join(r.split("/", 1)[1] for r in refs)
+    return {"message": f"Запушено только твое, без доп. веток ({short})"
+                       + (". Ветка на сервере перезаписана: доп. ветки из нее убраны" if rewrite else ""),
+            "output": out, "touched": touched}
+
+
+def extra_parents(repo):
+    """Все коммиты доп. веток, которые когда-либо вливались в текущую (вторые родители merge-коммитов)."""
+    tips = merged_tips(repo)
+    out = set(tips.values())
+    base = base_ref(repo)
+    rng = [f"{base}..HEAD"] if base else ["-200", "HEAD"]
+    for l in git(repo, "log", "--first-parent", "--merges", "--format=%P%x09%s", *rng).splitlines():
+        parents, _, subj = l.partition("\t")
+        m = MERGED_RE.match(subj.strip())
+        ps = parents.split()
+        if m and m.group(1) in tips and len(ps) > 1:
+            out.add(ps[1])
     return out
 
 
@@ -925,9 +1186,12 @@ def api_git(req):
                 raise ValueError(out)
             code, out = git_run(repo, "commit", "-m", message, "--", *files)
         msg = "Коммит создан"
+    elif op == "push_preview":
+        return api_push(repo, dry=True)
     elif op == "push":
-        code, out = git_run(repo, "push", "-u", "origin", "HEAD", timeout=180)
-        msg = "Запушено"
+        r = api_push(repo)
+        mr = re.search(r"https?://\S+merge_requests/new\S*", r.get("output", ""))
+        return {**r, "mr": mr.group(0) if mr else None}
     else:
         raise ValueError("Неизвестная git-операция")
     if code:
