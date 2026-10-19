@@ -2152,9 +2152,9 @@ async function apply() {
 
 /* ================= git ================= */
 function suggestMsg() {
-  const m = (S.git.branch || "").match(/LES-\d+/i);
-  const pre = m ? m[0].toUpperCase() + ": " : "";
-  return lastAdded ? `${pre}добавлена страница ${lastAdded.title}` : pre ? pre + "правки меню документации" : "";
+  // по умолчанию просто «LES-13067 правки»: номера задач берутся из названия ветки
+  const keys = [...new Set(((S.git.branch || "").match(/LES-\d+/gi) || []).map(k => k.toUpperCase()))];
+  return (keys.length ? keys.join(" ") + " " : "") + "правки";
 }
 function renderGit() {
   const g = S.git;
@@ -2257,7 +2257,7 @@ async function switchBranch(name, mode, message) {
     <div class="note info" style="margin-top:10px">${ic("info")}<span><b>Отложить</b>: правки уберутся в «Отложенные правки» в блоке Git, потом вернешь их кнопкой «Вернуть сюда» (обычно на этой же ветке).<br>
       <b>Закоммитить</b>: правки сохранятся коммитом в ветку ${esc(cur)}.<br>
       <b>Сбросить</b>: правки уйдут в корзину программы, вернуть можно кнопкой «Отменить».</span></div>
-    <label class="fl">Сообщение коммита (для «Закоммитить»)</label><input type="text" id="swMsg" value="${esc(suggestMsg() || "Правки перед переключением ветки")}">`,
+    <label class="fl">Сообщение коммита (для «Закоммитить»)</label><input type="text" id="swMsg" value="${esc(suggestMsg())}">`,
     [{text: "Отмена"},
      {text: ic("trash") + "Сбросить", cls: "danger", onClick: () => switchBranch(name, "discard")},
      {text: ic("commit") + "Закоммитить", onClick: () => switchBranch(name, "commit", $("#swMsg").value)},
