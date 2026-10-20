@@ -1159,8 +1159,16 @@ def api_git(req):
         if not name or git_run(repo, "check-ref-format", "--branch", name)[0] != 0:
             raise ValueError("Недопустимое имя ветки: " + name + ". Нельзя пробелы, ~ ^ : ? * [ \\, две точки подряд, "
                              "начинать с - и заканчивать на / или .lock")
-        code, out = git_run(repo, "switch", "-c", name)
-        msg = f"Создана ветка {name}"
+        # новая ветка задачи всегда от свежего master, а не от текущей ветки
+        git_run(repo, "fetch", "origin", timeout=60)
+        if git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{name}"):
+            raise ValueError(f"Ветка {name} уже есть на сервере: выбери ее в списке и нажми «Переключить»")
+        base = base_ref(repo)
+        code, out = git_run(repo, "switch", "-c", name, "--no-track", *([base] if base else []))
+        if code and base:
+            raise ValueError("Не получилось создать ветку от " + base + ": незакоммиченные правки мешают. "
+                             "Закоммить или отложи их и повтори.\n" + out)
+        msg = f"Создана ветка {name} от свежего {base}" if base else f"Создана ветка {name}"
     elif op == "commit":
         message = (req.get("message") or "").strip()
         if not message:

@@ -2223,7 +2223,8 @@ function renderGit() {
     <div class="gstep"><div class="lbl">${ic("branch")}Ветка</div>
       ${master ? `<div class="note warn" style="margin:0 0 8px">${ic("warn")}<span>Ты на ${esc(g.branch)}. Переключись на ветку задачи или создай новую, изменения перейдут в нее.</span></div>` : ""}
       <div class="row"><input type="text" id="gSw" list="gBrList" placeholder="Выбери ветку или начни вводить название"><datalist id="gBrList"></datalist><button id="gSwBtn">Переключить</button></div>
-      <div class="row" style="margin-top:6px"><input type="text" id="gBr" value="${esc(prevBr || "feature/LES-")}"><button id="gBrBtn">Создать ветку</button></div></div>
+      <div class="row" style="margin-top:6px"><input type="text" id="gBr" value="${esc(prevBr || "feature/LES-")}"><button id="gBrBtn" title="Новая ветка создается от свежего master, а не от текущей ветки">Создать ветку</button></div>
+      <div class="small muted" style="margin-top:4px">Новая ветка создается от свежего ${esc(g.base || "master")}. Незакоммиченные правки переходят в нее.</div></div>
     <div class="gstep"><div class="lbl">${ic("commit")}Коммит</div>
       <div class="row"><input type="text" id="gMsg" placeholder="Что сделано" value="${esc(prevMsg || suggestMsg())}"><button id="gCommit" ${picked.length ? "" : "disabled"}>Закоммитить</button></div>
       <div class="small muted" style="margin-top:4px">${ch.length ? `В коммит попадут отмеченные галочками файлы: ${picked.length} из ${ch.filter(canCommit).length}. Неотмеченные останутся незакоммиченными.`
