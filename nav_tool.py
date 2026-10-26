@@ -229,7 +229,11 @@ def docs_dir_of(lines):
     for l in lines:
         m = re.match(r"^docs_dir\s*:\s*['\"]?([^'\"#]+?)['\"]?\s*(#.*)?$", l)
         if m:
-            return m.group(1).strip()
+            d = m.group(1).strip()
+            # docs_dir вне проекта (../, C:/, /abs) открыл бы через API любые файлы на диске
+            if d.startswith(("/", "\\")) or ".." in re.split(r"[\\/]", d) or re.match(r"^[a-zA-Z]:", d):
+                raise ValueError(f"docs_dir: {d} указывает за пределы проекта, программа так не работает")
+            return d
     return "docs"
 
 
@@ -1082,12 +1086,15 @@ def api_git(req):
             return {"message": f"Ты уже на ветке {name}", "output": ""}
         args = ["switch", name] if b["local"] else ["switch", "--track", b["remote"]]
         # что сделать с незакоммиченными правками, если они мешают: отложить, закоммитить или сбросить
-        mode, cur, pre = req.get("mode"), info["current"], ""
+        mode, cur, pre, stashed = req.get("mode"), info["current"], "", False
         if mode == "stash":
+            before = git(repo, "rev-parse", "--verify", "--quiet", "refs/stash")
             code, out = git_run(repo, "stash", "push", "-u", "-m", f"navtool: правки с ветки {cur}")
             if code:
                 raise ValueError("Не получилось отложить правки:\n" + out)
-            pre = "Правки отложены. "
+            # на чистом дереве stash push ничего не откладывает: тогда и возвращать нечего
+            stashed = git(repo, "rev-parse", "--verify", "--quiet", "refs/stash") != before
+            pre = "Правки отложены. " if stashed else ""
         elif mode == "commit":
             message = (req.get("message") or "").strip() or f"Правки перед переключением на {name}"
             lines, _, _, _ = read_yml(repo)
@@ -1101,7 +1108,7 @@ def api_git(req):
             pre = "Правки сброшены (вернуть можно кнопкой «Отменить»). "
         code, out = git_run(repo, *args, timeout=60)
         if code:
-            if mode == "stash":
+            if stashed:
                 git_run(repo, "stash", "pop")
             if "would be overwritten" in out or "перезапис" in out:
                 files = [l.strip() for l in out.splitlines() if l.startswith(("\t", "    "))]
@@ -1159,16 +1166,26 @@ def api_git(req):
         if not name or git_run(repo, "check-ref-format", "--branch", name)[0] != 0:
             raise ValueError("Недопустимое имя ветки: " + name + ". Нельзя пробелы, ~ ^ : ? * [ \\, две точки подряд, "
                              "начинать с - и заканчивать на / или .lock")
-        # новая ветка задачи всегда от свежего master, а не от текущей ветки
-        git_run(repo, "fetch", "origin", timeout=60)
+        # новая ветка задачи всегда от свежего master, а не от текущей ветки;
+        # в форке основа - upstream/master, его тоже надо скачать
+        fetched = git_run(repo, "fetch", "origin", timeout=60)[0] == 0
+        base = base_ref(repo)
+        if base and not base.startswith("origin/"):
+            fetched = git_run(repo, "fetch", base.split("/", 1)[0], timeout=60)[0] == 0 and fetched
         if git(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{name}"):
             raise ValueError(f"Ветка {name} уже есть на сервере: выбери ее в списке и нажми «Переключить»")
-        base = base_ref(repo)
+        if git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}"):
+            raise ValueError(f"Ветка {name} уже есть на этом компьютере: выбери ее в списке и нажми «Переключить»")
         code, out = git_run(repo, "switch", "-c", name, "--no-track", *([base] if base else []))
         if code and base:
             raise ValueError("Не получилось создать ветку от " + base + ": незакоммиченные правки мешают. "
                              "Закоммить или отложи их и повтори.\n" + out)
-        msg = f"Создана ветка {name} от свежего {base}" if base else f"Создана ветка {name}"
+        if not base:
+            msg = f"Создана ветка {name}"
+        elif fetched:
+            msg = f"Создана ветка {name} от свежего {base}"
+        else:
+            msg = f"Создана ветка {name} от {base}. Скачать обновления с сервера не получилось, основа может быть не самой свежей"
     elif op == "commit":
         message = (req.get("message") or "").strip()
         if not message:
@@ -1215,7 +1232,8 @@ def push_undo(repo, label, file=None, file_existed=False):
     stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns() % 10**6:06d}"
     yb = BACKUPS / f"mkdocs-{stamp}.yml"
     shutil.copy2(yml_path(repo), yb)
-    entry = {"repo": repo, "label": label, "yml": str(yb), "file": None, "file_backup": None}
+    entry = {"repo": repo, "label": label, "yml": str(yb), "file": None, "file_backup": None,
+             "branch": git(repo, "rev-parse", "--abbrev-ref", "HEAD")}
     if file:
         entry["file"] = str(file)
         if file_existed:
@@ -1309,7 +1327,7 @@ def api_discard(req):
     names = ", ".join(sorted({x for e in entries for x in e[1:] if x}))
     cfg = load_config()
     stack = cfg.get("undo") if isinstance(cfg.get("undo"), list) else []
-    stack.append({"repo": repo, "label": f"сброс изменений: {names}"[:200], "kind": "files", "items": items,
+    stack.append({"repo": repo, "branch": git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "label": f"сброс изменений: {names}"[:200], "kind": "files", "items": items,
                   "trash": str(trash)})
     cfg["undo"] = stack[-UNDO_DEPTH:]
     save_config(cfg)
@@ -1322,7 +1340,11 @@ def api_undo(repo):
     idx = next((i for i in range(len(stack) - 1, -1, -1) if stack[i]["repo"] == repo), None)
     if idx is None:
         raise ValueError("Нечего откатывать")
-    e = stack.pop(idx)
+    e = stack[idx]
+    # снимок mkdocs.yml снят на другой ветке: копия затерла бы чужое меню
+    if e.get("branch") and git(repo, "rev-parse", "--abbrev-ref", "HEAD") not in ("", e["branch"]):
+        raise ValueError(f"«{e['label']}» сделано на ветке {e['branch']}. Переключись на нее, чтобы отменить")
+    stack.pop(idx)
     need = [it["backup"] for it in e.get("items", []) + e.get("files", []) if it.get("backup")]
     need += [e[k] for k in ("yml", "file_backup") if e.get(k)]
     if e.get("kind") == "move":
@@ -1815,7 +1837,7 @@ def api_move(req):
         write_yml(repo, lines, nl, bom)
     cfg = load_config()
     stack = cfg.get("undo") if isinstance(cfg.get("undo"), list) else []
-    stack.append({"repo": repo, "label": f"перенос {plan['src']} в {posixpath.dirname(plan['dst']) or docs_name}",
+    stack.append({"repo": repo, "branch": git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "label": f"перенос {plan['src']} в {posixpath.dirname(plan['dst']) or docs_name}",
                   "kind": "move", "from": str(dst_abs), "to": str(src_abs), "yml": str(trash / "mkdocs.yml"),
                   "files": saved, "trash": str(trash)})
     cfg["undo"] = stack[-UNDO_DEPTH:]
@@ -1995,7 +2017,7 @@ def api_nav_delete(req):
     what = f"«{n['title']}»" + ("" if n["path"] else f" (раздел, страниц: {len(pages)})")
     cfg = load_config()
     stack = cfg.get("undo") if isinstance(cfg.get("undo"), list) else []
-    stack.append({"repo": repo, "label": f"удаление {what}" + (" вместе с файлами" if files and items else " из меню"),
+    stack.append({"repo": repo, "branch": git(repo, "rev-parse", "--abbrev-ref", "HEAD"), "label": f"удаление {what}" + (" вместе с файлами" if files and items else " из меню"),
                   "kind": "files", "items": items, "yml": str(trash / "mkdocs.yml"), "trash": str(trash)})
     cfg["undo"] = stack[-UNDO_DEPTH:]
     save_config(cfg)
@@ -2759,6 +2781,18 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass  # браузер уже закрыл соединение
 
+    def foreign(self, post=False):
+        """Запрос не от своей страницы. Host отсекает DNS rebinding, Origin и JSON - запросы
+        с чужих сайтов (форма или no-cors fetch не могут прислать application/json без preflight)."""
+        port = self.server.server_address[1]
+        own = (f"127.0.0.1:{port}", f"localhost:{port}")
+        if self.headers.get("Host", "") not in own:
+            return True
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in tuple("http://" + h for h in own):
+            return True
+        return post and not self.headers.get("Content-Type", "").startswith("application/json")
+
     def send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body if isinstance(body, bytes) else json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -2771,6 +2805,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if self.foreign():
+            self.safe_send(403, {"error": "forbidden"})
+            return
         try:
             if u.path == "/":
                 self.send(200, UI.read_bytes(), "text/html; charset=utf-8")
@@ -2815,6 +2852,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
+        if self.foreign(post=True):
+            self.safe_send(403, {"error": "forbidden"})
+            return
         try:
             n = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
