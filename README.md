@@ -1,52 +1,57 @@
 # Nav Tool
 
-Настольная программа для тех, кто ведет документацию на MkDocs (подход «документация как код»). Все, что обычно делается руками в `mkdocs.yml`, редакторе и git, собрано в одном окне.
+[Русская версия](README.ru.md)
 
-Программа работает только на твоем компьютере: локальный сервер на `127.0.0.1` и окно в режиме приложения Edge. Никуда, кроме твоего git-сервера и источников обновлений, данные не отправляются.
+Desktop app for people who keep documentation in MkDocs (docs as code). Everything usually done by hand in `mkdocs.yml`, an editor and git is gathered in one window.
 
-## Что умеет
+## Features
 
-- **Меню сайта (`nav`)**: дерево разделов и страниц, добавление страниц галочками, новые разделы (в том числе вложенные пустые), переименование, порядок, удаление вместе с файлами. `mkdocs.yml` правится построчно, комментарии и форматирование сохраняются.
-- **Файлы `docs/`**: дерево всех файлов, новые файлы и папки, перенос перетаскиванием с автоматической правкой путей в меню и относительных ссылок.
-- **Редактор Markdown**: панель форматирования, предпросмотр тем же движком и расширениями, что у mkdocs (видно «кашу» до коммита), диаграммы Mermaid в предпросмотре, картинки из файла или буфера обмена (кладутся рядом со страницей), синхронная прокрутка, масштаб.
-- **Шаблоны**: свои заготовки страниц и блоков с подстановкой номера задачи, заголовка и даты. Передаются коллегам одним файлом.
-- **Проверка `mkdocs.yml`**: показывает ошибку с номером строки, простые ошибки исправляет кнопкой, не дает записать правку, которая сломает файл.
-- **Локальный сайт**: `mkdocs serve` одной кнопкой, сам ставит mkdocs и плагины из `requirements.txt` проекта, умеет поставить Node.js и likec4 для C4-диаграмм.
-- **Git**: изменения, отмена по файлу, ветки (выбор, создание, переключение с откладыванием правок), коммит выбранных файлов, push, ссылка на Merge Request, скачивание обновлений, добавление в свою ветку другой неслитой ветки с объединением пунктов меню при конфликте. У страниц видно, из какой ветки они пришли.
-- **Отмена**: почти любое действие откатывается кнопкой «Отменить».
-- **Светлая и темная тема**.
+- **Site menu (`nav`).** Tree of sections and pages, adding pages with checkboxes, new sections (including empty nested ones), renaming, reordering, deleting together with files. `mkdocs.yml` is edited line by line, so comments and formatting stay.
+- **`docs/` files.** Tree of all files, new files and folders, moving by drag and drop with automatic fixes of menu paths and relative links.
+- **Markdown editor.** Formatting toolbar, preview with the same engine and extensions as mkdocs (you see broken markup before the commit), Mermaid diagrams, images from a file or the clipboard (saved next to the page), synced scrolling, zoom.
+- **Templates.** Own page and block blanks with the task number, title and date filled in. Shared with colleagues as one file.
+- **`mkdocs.yml` check.** Shows the error with a line number, fixes simple errors with a button, does not save an edit that would break the file.
+- **Local site.** `mkdocs serve` with one button. Installs mkdocs and plugins from the project's `requirements.txt` into its own environment, can install Node.js and likec4 for C4 diagrams.
+- **Git.** Changes, revert by file, branches (pick, create, switch with stashing), commit of selected files, push, Merge Request link, pulling updates, merging another unmerged branch into yours with menu items combined on conflict. Each page shows which branch it came from.
+- **Undo.** Almost any action can be rolled back with "Undo".
+- **Light and dark theme.**
 
-## Что нужно
+## How it works
 
-- Windows 10 или 11.
-- Python 3.10 или новее (при установке отметить «Add python.exe to PATH»).
+- `nav_tool.py` starts a local HTTP server on `127.0.0.1` and opens the UI (`ui.html`) in an Edge or Chrome app-mode window with its own profile.
+- Data goes only to your git server and to the update source. Mermaid for the preview is loaded from jsDelivr.
+- mkdocs and its plugins run in a separate virtual environment `.mkdocs-env` next to the program, so the system Python stays clean.
+- Updates come from this repository: when a new version is out, an "Update" button shows the change list, pulls the new version and restarts the app. Settings, templates and backups stay in the program folder and are not tracked by git.
+
+## Tech stack
+
+- **Python 3.10+**, standard library `http.server` for the backend.
+- [PyYAML](https://pyyaml.org) and [Python-Markdown](https://python-markdown.github.io) for `mkdocs.yml` and the preview.
+- **HTML/JS** single-page UI, [Mermaid](https://mermaid.js.org) for diagrams.
+- **Git** CLI for all repository actions.
+
+## Requirements
+
+- Windows 10 or 11.
+- Python 3.10 or newer (check "Add python.exe to PATH" during installation).
 - Git.
-- Microsoft Edge или Google Chrome (для окна программы; в Windows Edge есть всегда).
-- Node.js нужен только для C4-диаграмм likec4 на локальном сайте, программа может поставить его сама.
+- Microsoft Edge or Google Chrome (Edge is always present on Windows).
+- Node.js only for likec4 C4 diagrams on the local site; the app can install it itself.
 
-Пакеты Python руками ставить не нужно.
+Python packages are installed by the app.
 
-## Установка
+## Getting started
 
 ```
 git clone https://github.com/Trashfallen/Nav_tool.git NavTool
 ```
 
-Один раз запустить `NavTool\run.bat`. Программа создаст на рабочем столе ярлык «Nav Tool», дальше запускать им.
+Run `NavTool\run.bat` once. The app creates a "Nav Tool" shortcut on the desktop; use it from then on.
 
-## Обновление
+## Templates
 
-Когда в репозитории появляется новая версия, в программе сверху справа появляется кнопка «Обновить программу». Она показывает список изменений, скачивает новую версию и перезапускает программу. Свои настройки, шаблоны и копии для отката остаются на месте: они лежат в папке программы и в git не попадают (см. `.gitignore`).
+The repository has no templates: every team has its own. Templates are shared as `navtool-templates.json`: "Templates" -> "Load templates from file" in the editor, "Save templates to file" to export your own. Template text can use `{{LES}}`, `{{TITLE}}`, `{{NAME}}`, `{{DATE}}`.
 
-## Шаблоны
+## More
 
-В репозитории шаблонов нет: у каждой команды они свои. Шаблоны передаются файлом `navtool-templates.json`:
-
-- в редакторе «Шаблоны» → «Загрузить шаблоны из файла»;
-- «Сохранить шаблоны в файл» выгружает свои, чтобы отдать коллегам.
-
-В тексте шаблона можно использовать метки `{{LES}}`, `{{TITLE}}`, `{{NAME}}`, `{{DATE}}`.
-
-## Подробнее
-
-Пошаговая инструкция по всем кнопкам: [ИНСТРУКЦИЯ.md](ИНСТРУКЦИЯ.md).
+Step-by-step guide to every button (in Russian): [ИНСТРУКЦИЯ.md](ИНСТРУКЦИЯ.md).
